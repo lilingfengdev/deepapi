@@ -5,6 +5,8 @@ OpenAI 兼容的 Chat Completion API
 import time
 import uuid
 import json
+import logging
+import asyncio
 from typing import AsyncIterator, Dict, Any
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -20,6 +22,7 @@ from engine.deep_think import DeepThinkEngine
 from engine.ultra_think import UltraThinkEngine
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def extract_llm_params(request: ChatCompletionRequest) -> Dict[str, Any]:
@@ -60,6 +63,7 @@ async def stream_chat_completion(
     """流式聊天补全"""
     request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
     created = int(time.time())
+    engine_task = None  # 用于跟踪引擎任务以便在断开时取消
     
     # 提取 LLM 参数
     llm_params = extract_llm_params(request)
@@ -166,44 +170,64 @@ async def stream_chat_completion(
         )
         
         # 在后台运行引擎
-        import asyncio
         engine_task = asyncio.create_task(engine.run())
         
-        # 流式发送进度
-        while not engine_task.done():
-            # 处理队列中的进度事件
+        try:
+            # 流式发送进度
+            while not engine_task.done():
+                # 处理队列中的进度事件
+                while progress_queue:
+                    event = progress_queue.pop(0)
+                    async for chunk in stream_progress(event):
+                        yield chunk
+                await asyncio.sleep(0.1)  # 短暂等待避免busy loop
+            
+            # 获取最终结果
+            result = await engine_task
+            
+            # 处理剩余的进度事件
             while progress_queue:
                 event = progress_queue.pop(0)
                 async for chunk in stream_progress(event):
                     yield chunk
-            await asyncio.sleep(0.1)  # 短暂等待避免busy loop
-        
-        # 获取最终结果
-        result = await engine_task
-        
-        # 处理剩余的进度事件
-        while progress_queue:
-            event = progress_queue.pop(0)
-            async for chunk in stream_progress(event):
-                yield chunk
-        
-        # 流式发送最终答案
-        final_text = result.summary or result.final_solution
-        for i in range(0, len(final_text), 50):
-            chunk = final_text[i:i+50]
-            delta = {"content": chunk}
-            chunk_data = {
-                "id": request_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": request.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": delta,
-                    "finish_reason": None
-                }]
-            }
-            yield f"data: {json.dumps(chunk_data)}\n\n"
+            
+            # 流式发送最终答案
+            final_text = result.summary or result.final_solution
+            for i in range(0, len(final_text), 50):
+                chunk = final_text[i:i+50]
+                delta = {"content": chunk}
+                chunk_data = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": request.model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": delta,
+                        "finish_reason": None
+                    }]
+                }
+                yield f"data: {json.dumps(chunk_data)}\n\n"
+        except GeneratorExit:
+            # 客户端断开连接，取消引擎任务
+            logger.info(f"Client disconnected for request {request_id}, cancelling engine task")
+            if engine_task and not engine_task.done():
+                engine_task.cancel()
+                try:
+                    await engine_task
+                except asyncio.CancelledError:
+                    pass  # 预期的取消异常
+            # 不重新抛出 GeneratorExit，让生成器正常结束
+        except (asyncio.CancelledError, Exception) as e:
+            # 其他异常情况，记录日志并取消任务
+            logger.error(f"Error during streaming for request {request_id}: {e}")
+            if engine_task and not engine_task.done():
+                engine_task.cancel()
+                try:
+                    await engine_task
+                except asyncio.CancelledError:
+                    pass
+            raise  # 重新抛出异常
     
     else:  # deepthink
         # DeepThink 模式
@@ -233,44 +257,64 @@ async def stream_chat_completion(
         )
         
         # 在后台运行引擎
-        import asyncio
         engine_task = asyncio.create_task(engine.run())
         
-        # 流式发送进度
-        while not engine_task.done():
-            # 处理队列中的进度事件
+        try:
+            # 流式发送进度
+            while not engine_task.done():
+                # 处理队列中的进度事件
+                while progress_queue:
+                    event = progress_queue.pop(0)
+                    async for chunk in stream_progress(event):
+                        yield chunk
+                await asyncio.sleep(0.1)  # 短暂等待避免busy loop
+            
+            # 获取最终结果
+            result = await engine_task
+            
+            # 处理剩余的进度事件
             while progress_queue:
                 event = progress_queue.pop(0)
                 async for chunk in stream_progress(event):
                     yield chunk
-            await asyncio.sleep(0.1)  # 短暂等待避免busy loop
-        
-        # 获取最终结果
-        result = await engine_task
-        
-        # 处理剩余的进度事件
-        while progress_queue:
-            event = progress_queue.pop(0)
-            async for chunk in stream_progress(event):
-                yield chunk
-        
-        # 流式发送最终答案
-        final_text = result.summary or result.final_solution
-        for i in range(0, len(final_text), 50):
-            chunk = final_text[i:i+50]
-            delta = {"content": chunk}
-            chunk_data = {
-                "id": request_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": request.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": delta,
-                    "finish_reason": None
-                }]
-            }
-            yield f"data: {json.dumps(chunk_data)}\n\n"
+            
+            # 流式发送最终答案
+            final_text = result.summary or result.final_solution
+            for i in range(0, len(final_text), 50):
+                chunk = final_text[i:i+50]
+                delta = {"content": chunk}
+                chunk_data = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": request.model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": delta,
+                        "finish_reason": None
+                    }]
+                }
+                yield f"data: {json.dumps(chunk_data)}\n\n"
+        except GeneratorExit:
+            # 客户端断开连接，取消引擎任务
+            logger.info(f"Client disconnected for request {request_id}, cancelling engine task")
+            if engine_task and not engine_task.done():
+                engine_task.cancel()
+                try:
+                    await engine_task
+                except asyncio.CancelledError:
+                    pass  # 预期的取消异常
+            # 不重新抛出 GeneratorExit，让生成器正常结束
+        except (asyncio.CancelledError, Exception) as e:
+            # 其他异常情况，记录日志并取消任务
+            logger.error(f"Error during streaming for request {request_id}: {e}")
+            if engine_task and not engine_task.done():
+                engine_task.cancel()
+                try:
+                    await engine_task
+                except asyncio.CancelledError:
+                    pass
+            raise  # 重新抛出异常
     
     # 发送结束标记
     chunk_data = {
