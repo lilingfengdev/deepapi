@@ -1,0 +1,21 @@
+# Deep Think API 依赖
+
+# Web 框架
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+
+# OpenAI 客户端
+openai>=1.10.0
+
+# 配置管理
+pyyaml>=6.0.1
+
+# 异步支持
+asyncio
+aiofiles>=23.2.1
+aiolimiter>=1.1.0
+
+# 日志
+python-json-logger>=2.0.7
+

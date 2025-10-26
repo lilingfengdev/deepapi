@@ -1,0 +1,92 @@
+# Deep Think API 配置文件示例
+# 复制此文件为 config.yaml 并填写您的配置
+
+system:
+  # API 访问密钥 (用于保护您的 API)
+  key: "your-api-key-here"
+  # 服务器配置
+  host: "0.0.0.0"
+  port: 8000
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+
+# 后端模型提供者配置
+provider:
+  # OpenAI 兼容的提供商
+  openai:
+    base_url: "https://api.openai.com/v1"
+    key: "sk-xxx"
+    # 是否使用 response API (流式)
+    response_api: true
+  
+  # Gemini 示例
+  gemini:
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+    key: "your-gemini-key"
+    response_api: true
+  
+  # Anthropic 示例
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+    key: "sk-ant-xxx"
+    response_api: true
+
+# 向外导出的模型列表 (通过 /v1/models 访问)
+model:
+  # 标准 DeepThink 模型
+  gemini-2.5-pro-deepthink:
+    name: "Gemini 2.5 Pro DeepThink"
+    provider: gemini                    # 后端提供商
+    model: gemini-2.5-pro               # 后端模型名
+    level: deepthink                    # 运行的 Agent 类型: deepthink, ultrathink
+    rpm: 10                             # 每分钟限制请求数 (可选)
+    max_iterations: 30                  # 最大迭代次数
+    required_verifications: 3           # 需要的成功验证次数
+    feature:
+      vision: true                      # 视觉能力
+      summary_think: true               # 生成思维链摘要
+      plan_mode: true                   # 计划模式
+      ask_mode: true                    # 询问模式
+    
+    # 分阶段模型配置 (可选,不写则全部使用主模型)
+    models:
+      initial: gemini-2.5-pro           # 初始思考阶段
+      improvement: gemini-2.5-pro       # 自我改进阶段
+      verification: gemini-2.5-pro      # 验证阶段
+      correction: gemini-2.5-pro        # 修正阶段
+      summary: gemini-2.5-pro           # 总结阶段
+
+  # 快速版本 - 更高的 RPM
+  gemini-2.5-pro-deepthink-fast:
+    name: "Gemini 2.5 Pro DeepThink Fast"
+    provider: gemini
+    model: gemini-2.5-pro
+    level: deepthink
+    rpm: 50                             # 更高的速率限制
+    max_iterations: 15                  # 更少的迭代次数以加快速度
+    required_verifications: 2
+    feature:
+      vision: true
+      summary_think: true
+
+  # UltraThink 模型示例
+  gpt-4o-ultrathink:
+    name: "GPT-4O Ultra Think"
+    provider: openai
+    model: gpt-4o
+    level: ultrathink
+    num_agent: 5                        # UltraThink 最大 Agent 数量
+    parallel_run_agent: 3               # 最大并行运行的 Agent 数量
+    rpm: 20
+    feature:
+      vision: true
+      summary_think: true
+    
+    models:
+      planning: gpt-4o                  # UltraThink: 计划阶段
+      agent_config: gpt-4o              # UltraThink: Agent配置阶段
+      agent_thinking: gpt-4o            # UltraThink: Agent思考阶段
+      synthesis: gpt-4o                 # UltraThink: 综合阶段
+      summary: gpt-4o                   # 总结阶段
+
+
