@@ -41,7 +41,6 @@ model:
       vision: true                      # 视觉能力
       summary_think: true               # 生成思维链摘要
       plan_mode: true                   # 计划模式
-      ask_mode: true                    # 询问模式
     
     # 分阶段模型配置 (可选,不写则全部使用主模型)
     models:

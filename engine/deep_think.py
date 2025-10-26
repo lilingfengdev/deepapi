@@ -45,6 +45,7 @@ class DeepThinkEngine:
         model_stages: Dict[str, str] = None,
         on_progress: Optional[Callable[[ProgressEvent], None]] = None,
         enable_planning: bool = False,
+        llm_params: Optional[Dict[str, Any]] = None,
     ):
         self.client = client
         self.model = model
@@ -59,6 +60,7 @@ class DeepThinkEngine:
         self.on_progress = on_progress
         self.sources: List[Source] = []
         self.enable_planning = enable_planning
+        self.llm_params = llm_params or {}
     
     def _get_model_for_stage(self, stage: str) -> str:
         """获取特定阶段的模型"""
@@ -96,6 +98,7 @@ class DeepThinkEngine:
         plan = await self.client.generate_text(
             model=self.model,
             prompt=problem_statement,  # 保留多模态内容
+            **self.llm_params
         )
         
         self._emit("planning", {"plan": plan})
@@ -126,6 +129,7 @@ class DeepThinkEngine:
             model=verification_model,
             system=VERIFICATION_SYSTEM_PROMPT,
             prompt=verification_prompt,
+            **self.llm_params
         )
         
         # 检查验证是否通过
@@ -138,6 +142,7 @@ class DeepThinkEngine:
         good_verify = await self.client.generate_text(
             model=verification_model,
             prompt=check_prompt,
+            **self.llm_params
         )
         
         bug_report = ""
@@ -181,6 +186,7 @@ class DeepThinkEngine:
             model=initial_model,
             system=system_prompt,
             prompt=problem_statement,  # 保留多模态内容
+            **self.llm_params
         )
         
         self._emit("solution", {"solution": first_solution, "iteration": 0})
@@ -212,6 +218,7 @@ class DeepThinkEngine:
                 {"role": "assistant", "content": first_solution},
                 {"role": "user", "content": SELF_IMPROVEMENT_PROMPT},
             ],
+            **self.llm_params
         )
         
         self._emit("solution", {"solution": improved_solution, "iteration": 0})
@@ -312,6 +319,7 @@ class DeepThinkEngine:
                         {"role": "assistant", "content": solution},
                         {"role": "user", "content": CORRECTION_PROMPT + "\n\n" + verification["bug_report"]},
                     ],
+                    **self.llm_params
                 )
                 
                 self._emit("solution", {"solution": solution, "iteration": i + 1})
@@ -333,6 +341,7 @@ class DeepThinkEngine:
                 final_summary = await self.client.generate_text(
                     model=summary_model,
                     prompt=summary_prompt,
+                    **self.llm_params
                 )
                 
                 # 获取统计信息
@@ -379,6 +388,7 @@ class DeepThinkEngine:
         final_summary = await self.client.generate_text(
             model=summary_model,
             prompt=summary_prompt,
+            **self.llm_params
         )
         
         # 获取统计信息

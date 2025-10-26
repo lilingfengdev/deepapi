@@ -22,6 +22,27 @@ from engine.ultra_think import UltraThinkEngine
 router = APIRouter()
 
 
+def extract_llm_params(request: ChatCompletionRequest) -> Dict[str, Any]:
+    """从请求中提取 LLM 参数"""
+    params = {}
+    
+    # 提取标准 OpenAI 参数
+    if request.temperature is not None:
+        params['temperature'] = request.temperature
+    if request.top_p is not None:
+        params['top_p'] = request.top_p
+    if request.max_tokens is not None:
+        params['max_tokens'] = request.max_tokens
+    if request.presence_penalty is not None:
+        params['presence_penalty'] = request.presence_penalty
+    if request.frequency_penalty is not None:
+        params['frequency_penalty'] = request.frequency_penalty
+    if request.stop is not None:
+        params['stop'] = request.stop
+    
+    return params
+
+
 def verify_auth(authorization: str = Header(None)) -> bool:
     """验证 API 密钥"""
     if not config.api_key:
@@ -47,6 +68,9 @@ async def stream_chat_completion(
     """流式聊天补全"""
     request_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
     created = int(time.time())
+    
+    # 提取 LLM 参数
+    llm_params = extract_llm_params(request)
     
     # 保留完整的对话历史
     if not request.messages:
@@ -146,6 +170,7 @@ async def stream_chat_completion(
             model_stages=model_config.models,
             on_progress=on_progress,
             on_agent_update=on_agent_update,
+            llm_params=llm_params,
         )
         
         # 在后台运行引擎
@@ -212,6 +237,7 @@ async def stream_chat_completion(
             model_stages=model_config.models,
             on_progress=on_progress,
             enable_planning=model_config.has_plan_mode,
+            llm_params=llm_params,
         )
         
         # 在后台运行引擎
@@ -309,6 +335,9 @@ async def chat_completions(
     
     # 非流式响应
     else:
+        # 提取 LLM 参数
+        llm_params = extract_llm_params(request)
+        
         # 保留完整的对话历史
         if not request.messages:
             raise HTTPException(status_code=400, detail="No messages found")
@@ -359,6 +388,7 @@ async def chat_completions(
                 num_agents=model_config.num_agent,
                 parallel_run_agent=model_config.parallel_run_agent,
                 model_stages=model_config.models,
+                llm_params=llm_params,
             )
             result = await engine.run()
             response_text = result.summary or result.final_solution
@@ -377,6 +407,7 @@ async def chat_completions(
                 required_successful_verifications=model_config.required_verifications,
                 model_stages=model_config.models,
                 enable_planning=model_config.has_plan_mode,
+                llm_params=llm_params,
             )
             result = await engine.run()
             response_text = result.summary or result.final_solution

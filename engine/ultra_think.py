@@ -42,6 +42,7 @@ class UltraThinkEngine:
         model_stages: Dict[str, str] = None,
         on_progress: Optional[Callable[[ProgressEvent], None]] = None,
         on_agent_update: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        llm_params: Optional[Dict[str, Any]] = None,
     ):
         self.client = client
         self.model = model
@@ -58,6 +59,7 @@ class UltraThinkEngine:
         self.on_progress = on_progress
         self.on_agent_update = on_agent_update
         self.sources: List[Source] = []
+        self.llm_params = llm_params or {}
     
     def _get_model_for_stage(self, stage: str) -> str:
         """获取特定阶段的模型"""
@@ -85,6 +87,7 @@ class UltraThinkEngine:
             model=planning_model,
             system=system_prompt,
             prompt=problem_statement,  # 保留多模态内容
+            **self.llm_params
         )
         
         return plan
@@ -101,6 +104,7 @@ class UltraThinkEngine:
                 model=agent_config_model,
                 prompt=GENERATE_AGENT_PROMPTS_PROMPT.replace("{plan}", plan),
                 response_format={"type": "json_object"},
+                **self.llm_params
             )
             
             # 处理可能的响应格式
@@ -118,6 +122,7 @@ class UltraThinkEngine:
             text = await self.client.generate_text(
                 model=agent_config_model,
                 prompt=GENERATE_AGENT_PROMPTS_PROMPT.replace("{plan}", plan),
+                **self.llm_params
             )
             
             # 清理和解析JSON
@@ -194,6 +199,7 @@ class UltraThinkEngine:
                 max_errors_before_give_up=self.max_errors,
                 model_stages=self.model_stages,
                 on_progress=agent_progress_handler,
+                llm_params=self.llm_params,
             )
             
             deep_think_result = await engine.run()
@@ -323,6 +329,7 @@ Please analyze all approaches, identify the best insights from each, resolve any
             max_errors_before_give_up=self.max_errors,
             model_stages=self.model_stages,
             on_progress=synthesis_progress_handler,
+            llm_params=self.llm_params,
         )
         
         synthesis_result = await synthesis_engine.run()
@@ -345,6 +352,7 @@ Please analyze all approaches, identify the best insights from each, resolve any
         final_summary = await self.client.generate_text(
             model=summary_model,
             prompt=summary_prompt,
+            **self.llm_params
         )
         
         # 获取统计信息
