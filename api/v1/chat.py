@@ -26,19 +26,11 @@ def extract_llm_params(request: ChatCompletionRequest) -> Dict[str, Any]:
     """从请求中提取 LLM 参数"""
     params = {}
     
-    # 提取标准 OpenAI 参数
+    # 只提取 temperature 和 max_tokens 参数
     if request.temperature is not None:
         params['temperature'] = request.temperature
-    if request.top_p is not None:
-        params['top_p'] = request.top_p
     if request.max_tokens is not None:
         params['max_tokens'] = request.max_tokens
-    if request.presence_penalty is not None:
-        params['presence_penalty'] = request.presence_penalty
-    if request.frequency_penalty is not None:
-        params['frequency_penalty'] = request.frequency_penalty
-    if request.stop is not None:
-        params['stop'] = request.stop
     
     return params
 
