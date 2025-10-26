@@ -17,13 +17,8 @@ provider:
     base_url: "https://api.openai.com/v1"
     key: "sk-xxx"
     # 是否使用 response API (流式)
-    response_api: true
-  
-  # Gemini 示例
-  gemini:
-    base_url: "https://generativelanguage.googleapis.com/v1beta"
-    key: "your-gemini-key"
-    response_api: true
+    response_api: false
+
   
   # Anthropic 示例
   anthropic:
