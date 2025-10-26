@@ -5,6 +5,9 @@ OpenAI 客户端包装器
 from typing import Optional, Dict, Any, List, AsyncIterator
 from openai import AsyncOpenAI
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient:
@@ -93,6 +96,11 @@ class OpenAIClient:
         if hasattr(response, 'usage') and response.usage:
             self.total_tokens += response.usage.total_tokens
         
+        # 检查响应是否包含 choices
+        if not response.choices or len(response.choices) == 0:
+            logger.error(f"API 返回空响应: model={model}, response={response}")
+            raise ValueError(f"API 返回空响应，可能是模型过载或请求被拒绝。模型: {model}")
+        
         return response.choices[0].message.content
     
     async def generate_object(
@@ -135,6 +143,11 @@ class OpenAIClient:
         self.api_calls += 1
         if hasattr(response, 'usage') and response.usage:
             self.total_tokens += response.usage.total_tokens
+        
+        # 检查响应是否包含 choices
+        if not response.choices or len(response.choices) == 0:
+            logger.error(f"API 返回空响应: model={model}, response={response}")
+            raise ValueError(f"API 返回空响应，可能是模型过载或请求被拒绝。模型: {model}")
         
         text = response.choices[0].message.content
         
@@ -193,6 +206,11 @@ class OpenAIClient:
         self.api_calls += 1
         
         async for chunk in stream:
+            # 检查 chunk 是否包含 choices
+            if not chunk.choices or len(chunk.choices) == 0:
+                logger.warning(f"流式响应中收到空 chunk: model={model}")
+                continue
+            
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 
