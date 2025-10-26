@@ -161,17 +161,25 @@ class DeepThinkEngine:
         # 使用初始阶段的模型
         initial_model = self._get_model_for_stage("initial")
         
-        # 提取文本用于构建提示词
-        problem_text = extract_text_from_content(problem_statement)
-        full_prompt = build_initial_thinking_prompt(
-            problem_text,
-            other_prompts,
-            self.knowledge_context
-        )
+        # 构建系统提示词，包含知识库和历史上下文
+        system_prompt = DEEP_THINK_INITIAL_PROMPT
         
-        # 第一次思考 - 传递多模态内容
+        if self.knowledge_context:
+            system_prompt += (
+                "\n\n### Available Knowledge Base ###\n\n" +
+                self.knowledge_context +
+                "\n\n### End of Knowledge Base ###\n"
+            )
+        
+        # 添加历史对话上下文
+        if other_prompts:
+            system_prompt += "\n\n### Additional Context ###\n\n"
+            system_prompt += "\n\n".join(other_prompts)
+        
+        # 第一次思考 - 传递多模态内容和完整的系统提示词
         first_solution = await self.client.generate_text(
             model=initial_model,
+            system=system_prompt,
             prompt=problem_statement,  # 保留多模态内容
         )
         
@@ -182,6 +190,7 @@ class DeepThinkEngine:
         
         improvement_model = self._get_model_for_stage("improvement")
         
+        # 构建系统提示词，包含知识库和历史上下文
         system_prompt = DEEP_THINK_INITIAL_PROMPT
         if self.knowledge_context:
             system_prompt += (
@@ -189,6 +198,11 @@ class DeepThinkEngine:
                 self.knowledge_context +
                 "\n\n### End of Knowledge Base ###\n"
             )
+        
+        # 添加历史对话上下文
+        if other_prompts:
+            system_prompt += "\n\n### Additional Context ###\n\n"
+            system_prompt += "\n\n".join(other_prompts)
         
         improved_solution = await self.client.generate_text(
             model=improvement_model,
@@ -276,6 +290,7 @@ class DeepThinkEngine:
                 
                 correction_model = self._get_model_for_stage("correction")
                 
+                # 构建系统提示词，包含知识库和历史上下文
                 system_prompt = DEEP_THINK_INITIAL_PROMPT
                 if self.knowledge_context:
                     system_prompt += (
@@ -283,6 +298,11 @@ class DeepThinkEngine:
                         self.knowledge_context +
                         "\n\n### End of Knowledge Base ###\n"
                     )
+                
+                # 添加历史对话上下文
+                if self.other_prompts:
+                    system_prompt += "\n\n### Additional Context ###\n\n"
+                    system_prompt += "\n\n".join(self.other_prompts)
                 
                 solution = await self.client.generate_text(
                     model=correction_model,

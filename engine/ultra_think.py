@@ -74,13 +74,16 @@ class UltraThinkEngine:
         
         planning_model = self._get_model_for_stage("planning")
         
-        # 提取文本用于构建提示词
-        problem_text = extract_text_from_content(problem_statement)
-        prompt = ULTRA_THINK_PLAN_PROMPT.replace("{query}", problem_text)
+        # 构建系统提示词，包含历史对话上下文
+        system_prompt = None
+        if self.other_prompts:
+            system_prompt = "### Additional Context ###\n\n"
+            system_prompt += "\n\n".join(self.other_prompts)
         
-        # 传递多模态内容到 API
+        # 传递多模态内容到 API，同时包含历史上下文
         plan = await self.client.generate_text(
             model=planning_model,
+            system=system_prompt,
             prompt=problem_statement,  # 保留多模态内容
         )
         
@@ -177,11 +180,14 @@ class UltraThinkEngine:
                         self.on_agent_update(agent_id, {"status": "failed", "error": result.error})
             
             # 运行 Deep Think 引擎
+            # 合并历史对话上下文和 agent 特定提示词
+            agent_prompts = self.other_prompts + [specific_prompt]
+            
             engine = DeepThinkEngine(
                 client=self.client,
                 model=agent_thinking_model,
                 problem_statement=problem_statement,
-                other_prompts=[specific_prompt],
+                other_prompts=agent_prompts,
                 knowledge_context=self.knowledge_context,
                 max_iterations=self.max_iterations,
                 required_successful_verifications=self.required_verifications,
@@ -310,7 +316,7 @@ Please analyze all approaches, identify the best insights from each, resolve any
             client=self.client,
             model=synthesis_model,
             problem_statement=synthesis_problem,
-            other_prompts=[],
+            other_prompts=self.other_prompts,  # 传递历史对话上下文
             knowledge_context=self.knowledge_context,
             max_iterations=self.max_iterations,
             required_successful_verifications=self.required_verifications,
