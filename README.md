@@ -4,13 +4,13 @@ Python 版本的 Deep Think 推理引擎 API，提供 OpenAI 兼容的接口，�
 
 ## 特性
 
-✨ **OpenAI 兼容 API** - 完全兼容 OpenAI Chat Completion API
-🧠 **DeepThink 模式** - 单 Agent 深度迭代推理，连续验证确保质量
-🚀 **UltraThink 模式** - 多 Agent 并行探索，综合多角度分析
-⚡ **RPM 限制** - 灵活的每分钟请求数限制，区分快慢模型
-💭 **Summary Think** - 流式返回友好的思维链，提升用户体验
-🎯 **多模型支持** - 支持任何 OpenAI 兼容的 LLM 提供商
-📊 **分阶段模型** - 不同推理阶段可使用不同模型优化成本
+* ✨ **OpenAI 兼容 API** - 完全兼容 OpenAI Chat Completion API
+* 🧠 **DeepThink 模式** - 单 Agent 深度迭代推理，连续验证确保质量
+* 🚀 **UltraThink 模式** - 多 Agent 并行探索，综合多角度分析
+* ⚡ **RPM 限制** - 灵活的每分钟请求数限制，区分快慢模型
+* 💭 **Summary Think** - 流式返回友好的思维链，提升用户体验
+* 🎯 **多模型支持** - 支持任何 OpenAI 兼容的 LLM 提供商
+* 📊 **分阶段模型** - 不同推理阶段可使用不同模型优化成本
 
 ## 快速开始
 
