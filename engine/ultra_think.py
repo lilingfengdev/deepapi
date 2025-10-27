@@ -43,6 +43,7 @@ class UltraThinkEngine:
         model_stages: Dict[str, str] = None,
         on_progress: Optional[Callable[[ProgressEvent], None]] = None,
         on_agent_update: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        enable_parallel_check: bool = False,
         llm_params: Optional[Dict[str, Any]] = None,
     ):
         self.client = client
@@ -60,6 +61,7 @@ class UltraThinkEngine:
         self.model_stages = model_stages or {}
         self.on_progress = on_progress
         self.on_agent_update = on_agent_update
+        self.enable_parallel_check = enable_parallel_check
         self.sources: List[Source] = []
         self.llm_params = llm_params or {}
     
@@ -206,6 +208,7 @@ class UltraThinkEngine:
                 max_errors_before_give_up=self.max_errors,
                 model_stages=self.model_stages,
                 on_progress=agent_progress_handler,
+                enable_parallel_check=self.enable_parallel_check,
                 llm_params=self.llm_params,
             )
             
@@ -340,6 +343,7 @@ Please analyze all approaches, identify the best insights from each, resolve any
                 max_errors_before_give_up=self.max_errors,
                 model_stages=self.model_stages,
                 on_progress=synthesis_progress_handler,
+                enable_parallel_check=self.enable_parallel_check,
                 llm_params=self.llm_params,
             )
             

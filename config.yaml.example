@@ -37,6 +37,7 @@ model:
     rpm: 10                             # 每分钟限制请求数 (可选)
     max_iterations: 30                  # 最大迭代次数
     required_verifications: 3           # 需要的成功验证次数
+    parallel_check: true                # 并行验证模式 (同时启动3个验证LLM调用)
     feature:
       vision: true                      # 视觉能力
       summary_think: true               # 生成思维链摘要

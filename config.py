@@ -21,6 +21,7 @@ class ModelConfig:
         self.max_iterations = config.get("max_iterations", 30)
         self.required_verifications = config.get("required_verifications", 3)
         self.max_errors = config.get("max_errors_before_give_up", 10)
+        self.parallel_check = config.get("parallel_check", False)  # 并行验证模式
         
         # UltraThink 配置
         self.num_agent = config.get("num_agent")

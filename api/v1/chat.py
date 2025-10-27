@@ -160,6 +160,7 @@ async def stream_chat_completion(
             model_stages=model_config.models,
             on_progress=on_progress,
             on_agent_update=on_agent_update,
+            enable_parallel_check=model_config.parallel_check,
             llm_params=llm_params,
         )
         
@@ -242,6 +243,7 @@ async def stream_chat_completion(
             model_stages=model_config.models,
             on_progress=on_progress,
             enable_planning=model_config.has_plan_mode,
+            enable_parallel_check=model_config.parallel_check,
             llm_params=llm_params,
         )
         
@@ -404,6 +406,7 @@ async def chat_completions(
                 num_agents=model_config.num_agent,
                 parallel_run_agent=model_config.parallel_run_agent,
                 model_stages=model_config.models,
+                enable_parallel_check=model_config.parallel_check,
                 llm_params=llm_params,
             )
             result = await engine.run()
@@ -423,6 +426,7 @@ async def chat_completions(
                 required_successful_verifications=model_config.required_verifications,
                 model_stages=model_config.models,
                 enable_planning=model_config.has_plan_mode,
+                enable_parallel_check=model_config.parallel_check,
                 llm_params=llm_params,
             )
             result = await engine.run()

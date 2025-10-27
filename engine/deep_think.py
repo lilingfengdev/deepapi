@@ -46,6 +46,7 @@ class DeepThinkEngine:
         model_stages: Dict[str, str] = None,
         on_progress: Optional[Callable[[ProgressEvent], None]] = None,
         enable_planning: bool = False,
+        enable_parallel_check: bool = False,
         llm_params: Optional[Dict[str, Any]] = None,
     ):
         self.client = client
@@ -62,6 +63,7 @@ class DeepThinkEngine:
         self.on_progress = on_progress
         self.sources: List[Source] = []
         self.enable_planning = enable_planning
+        self.enable_parallel_check = enable_parallel_check
         self.llm_params = llm_params or {}
         self._task = None  # 用于存储当前任务，以便取消
     
@@ -158,6 +160,93 @@ class DeepThinkEngine:
         
         return {"bug_report": bug_report, "good_verify": good_verify}
     
+    async def _verify_solution_parallel(
+        self,
+        problem_statement: MessageContent,
+        solution: str
+    ) -> Dict[str, str]:
+        """并行验证解决方案 - 同时启动required_verifications个验证LLM调用，全部通过才算成功"""
+        detailed_solution = self._extract_detailed_solution(solution)
+        # 提取文本用于构建提示词
+        problem_text = extract_text_from_content(problem_statement)
+        verification_prompt = build_verification_prompt(
+            problem_text,
+            detailed_solution
+        )
+        
+        num_checks = self.required_verifications
+        self._emit("progress", {"message": f"Parallel verifying solution ({num_checks} concurrent checks)..."})
+        
+        # 使用验证阶段的模型
+        verification_model = self._get_model_for_stage("verification")
+        
+        # 同时启动required_verifications个验证LLM调用
+        verification_tasks = [
+            self.client.generate_text(
+                model=verification_model,
+                system=VERIFICATION_SYSTEM_PROMPT,
+                prompt=verification_prompt,
+                **self.llm_params
+            )
+            for _ in range(num_checks)
+        ]
+        
+        # 等待所有验证完成
+        verification_outputs = await asyncio.gather(*verification_tasks)
+        
+        # 检查每个验证结果
+        check_tasks = []
+        for verification_output in verification_outputs:
+            check_prompt = (
+                f'Response in "yes" or "no". Is the following statement saying the '
+                f'solution is correct, or does not contain critical error or a major '
+                f'justification gap?\n\n{verification_output}'
+            )
+            check_tasks.append(
+                self.client.generate_text(
+                    model=verification_model,
+                    prompt=check_prompt,
+                    **self.llm_params
+                )
+            )
+        
+        # 等待所有检查完成
+        good_verifies = await asyncio.gather(*check_tasks)
+        
+        # 统计通过的验证数量
+        passed_count = sum(1 for gv in good_verifies if "yes" in gv.lower())
+        
+        # 需要全部通过才算验证成功
+        passed = passed_count == num_checks
+        
+        # 收集 bug 报告（如果有的话）
+        bug_reports = []
+        if not passed:
+            for i, (verification_output, good_verify) in enumerate(zip(verification_outputs, good_verifies)):
+                if "yes" not in good_verify.lower():
+                    bug_report = self._extract_detailed_solution(
+                        verification_output,
+                        "Detailed Review",
+                        False
+                    )
+                    if bug_report:
+                        bug_reports.append(f"[Check {i+1}] {bug_report}")
+        
+        combined_bug_report = "\n\n".join(bug_reports) if bug_reports else ""
+        
+        # 返回综合结果
+        good_verify_summary = f"yes (passed {passed_count}/{num_checks} checks)" if passed else f"no (passed {passed_count}/{num_checks} checks)"
+        
+        return {
+            "bug_report": combined_bug_report,
+            "good_verify": good_verify_summary,
+            "parallel_results": {
+                "total_checks": num_checks,
+                "passed_checks": passed_count,
+                "individual_results": good_verifies
+            }
+        }
+    
     async def _initial_exploration(
         self,
         problem_statement: MessageContent,
@@ -242,11 +331,17 @@ class DeepThinkEngine:
         
         self._emit("solution", {"solution": improved_solution, "iteration": 0})
         
-        # 验证
-        verification = await self._verify_solution(
-            problem_statement,
-            improved_solution
-        )
+        # 验证 - 根据配置选择串行或并行
+        if self.enable_parallel_check:
+            verification = await self._verify_solution_parallel(
+                problem_statement,
+                improved_solution
+            )
+        else:
+            verification = await self._verify_solution(
+                problem_statement,
+                improved_solution
+            )
         
         self._emit("verification", {
             "passed": "yes" in verification["good_verify"].lower(),
@@ -400,8 +495,11 @@ class DeepThinkEngine:
                         knowledge_enhanced=len(self.sources) > 0,
                     )
                 
-                # 再次验证
-                verification = await self._verify_solution(self.problem_statement, solution)
+                # 再次验证 - 根据配置选择串行或并行
+                if self.enable_parallel_check:
+                    verification = await self._verify_solution_parallel(self.problem_statement, solution)
+                else:
+                    verification = await self._verify_solution(self.problem_statement, solution)
                 self._emit("verification", {
                     "passed": "yes" in verification["good_verify"].lower(),
                     "iteration": i + 1,
