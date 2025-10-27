@@ -18,7 +18,7 @@ class OpenAIClient:
         # 创建带有超时设置的 HTTP 客户端
         # 这样可以确保在客户端断开时，HTTP 请求能更快响应取消
         http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(300.0, connect=10.0, read=120.0),  # 总超时300秒，读取120秒
+            timeout=httpx.Timeout(3000.0, connect=10.0, read=1200.0),  # 总超时300秒，读取120秒
         )
         
         self.client = AsyncOpenAI(
