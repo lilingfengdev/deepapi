@@ -32,7 +32,8 @@ class UltraThinkEngine:
         client: OpenAIClient,
         model: str,
         problem_statement: MessageContent,  # 支持多模态内容
-        other_prompts: List[str] = None,
+        conversation_history: List[Dict[str, Any]] = None,  # 完整的消息历史
+        other_prompts: List[str] = None,  # 已弃用，保留向后兼容
         knowledge_context: str = None,
         max_iterations: int = 30,
         required_successful_verifications: int = 3,
@@ -48,7 +49,8 @@ class UltraThinkEngine:
         self.model = model
         self.problem_statement = problem_statement  # 可能是字符串或多模态内容
         self.problem_statement_text = extract_text_from_content(problem_statement)  # 提取纯文本版本
-        self.other_prompts = other_prompts or []
+        self.conversation_history = conversation_history or []  # 结构化的消息历史
+        self.other_prompts = other_prompts or []  # 向后兼容
         self.knowledge_context = knowledge_context
         self.max_iterations = max_iterations
         self.required_verifications = required_successful_verifications
@@ -76,17 +78,16 @@ class UltraThinkEngine:
         
         planning_model = self._get_model_for_stage("planning")
         
-        # 构建系统提示词，包含历史对话上下文
-        system_prompt = None
-        if self.other_prompts:
-            system_prompt = "### Additional Context ###\n\n"
-            system_prompt += "\n\n".join(self.other_prompts)
+        # 构建消息列表：历史消息 + 当前问题
+        messages = []
+        if self.conversation_history:
+            messages.extend(self.conversation_history)
+        messages.append({"role": "user", "content": problem_statement})
         
-        # 传递多模态内容到 API，同时包含历史上下文
+        # 使用完整的消息历史生成计划
         plan = await self.client.generate_text(
             model=planning_model,
-            system=system_prompt,
-            prompt=problem_statement,  # 保留多模态内容
+            messages=messages,
             **self.llm_params
         )
         
@@ -185,14 +186,20 @@ class UltraThinkEngine:
                         self.on_agent_update(agent_id, {"status": "failed", "error": result.error})
             
             # 运行 Deep Think 引擎
-            # 合并历史对话上下文和 agent 特定提示词
-            agent_prompts = self.other_prompts + [specific_prompt]
+            # 为 agent 创建增强的消息历史，包含特定提示词
+            agent_history = []
+            if self.conversation_history:
+                agent_history.extend(self.conversation_history)
+            
+            # 如果有特定提示词，添加为系统级指导（通过在问题前添加上下文）
+            # 注意：这里我们将 agent 特定提示词作为上下文，不改变核心问题
             
             engine = DeepThinkEngine(
                 client=self.client,
                 model=agent_thinking_model,
                 problem_statement=problem_statement,
-                other_prompts=agent_prompts,
+                conversation_history=agent_history,
+                other_prompts=[specific_prompt],  # agent 特定提示词作为额外上下文
                 knowledge_context=self.knowledge_context,
                 max_iterations=self.max_iterations,
                 required_successful_verifications=self.required_verifications,
@@ -322,7 +329,7 @@ Please analyze all approaches, identify the best insights from each, resolve any
             client=self.client,
             model=synthesis_model,
             problem_statement=synthesis_problem,
-            other_prompts=self.other_prompts,  # 传递历史对话上下文
+            conversation_history=self.conversation_history,  # 传递结构化的消息历史
             knowledge_context=self.knowledge_context,
             max_iterations=self.max_iterations,
             required_successful_verifications=self.required_verifications,

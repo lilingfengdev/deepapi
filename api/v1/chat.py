@@ -83,16 +83,15 @@ async def stream_chat_completion(
     # 同时提取纯文本版本用于日志和摘要
     problem_statement_text = extract_text_from_content(problem_statement_raw)
     
-    # 构建完整的对话上下文（排除最后一条用户消息）
-    conversation_context = ""
+    # 构建结构化的对话历史（排除最后一条用户消息）
+    conversation_history = []
     if len(request.messages) > 1:
         context_messages = request.messages[:-1]  # 排除最后一条消息
-        conversation_parts = []
         for msg in context_messages:
-            # 提取文本用于上下文说明
-            content_text = extract_text_from_content(msg.content)
-            conversation_parts.append(f"{msg.role.upper()}: {content_text}")
-        conversation_context = "\n\n".join(conversation_parts)
+            conversation_history.append({
+                "role": msg.role,
+                "content": msg.content
+            })
     
     # 创建后端客户端 - 传入RPM限制，将在每次调用后端API时进行限流
     client = create_client(provider_config.base_url, provider_config.key, model_config.rpm)
@@ -148,17 +147,12 @@ async def stream_chat_completion(
                 data={"agentId": agent_id, **update}
             ))
         
-        # 准备额外的提示词，包含对话上下文
-        other_prompts = []
-        if conversation_context:
-            other_prompts.append(f"\n### Previous Conversation ###\n{conversation_context}\n### End of Previous Conversation ###\n")
-        
-        # 运行引擎 - 传递多模态内容
+        # 运行引擎 - 传递结构化的对话历史和多模态内容
         engine = UltraThinkEngine(
             client=client,
             model=model_config.model,
             problem_statement=problem_statement_raw,  # 传递多模态内容
-            other_prompts=other_prompts,
+            conversation_history=conversation_history,  # 传递结构化的消息历史
             max_iterations=model_config.max_iterations,
             required_successful_verifications=model_config.required_verifications,
             num_agents=model_config.num_agent,
@@ -237,17 +231,12 @@ async def stream_chat_completion(
             """捕获进度事件"""
             progress_queue.append(event)
         
-        # 准备额外的提示词，包含对话上下文
-        other_prompts = []
-        if conversation_context:
-            other_prompts.append(f"\n### Previous Conversation ###\n{conversation_context}\n### End of Previous Conversation ###\n")
-        
-        # 运行引擎 - 传递多模态内容
+        # 运行引擎 - 传递结构化的对话历史和多模态内容
         engine = DeepThinkEngine(
             client=client,
             model=model_config.model,
             problem_statement=problem_statement_raw,  # 传递多模态内容
-            other_prompts=other_prompts,
+            conversation_history=conversation_history,  # 传递结构化的消息历史
             max_iterations=model_config.max_iterations,
             required_successful_verifications=model_config.required_verifications,
             model_stages=model_config.models,
@@ -389,27 +378,18 @@ async def chat_completions(
         # 同时提取纯文本版本用于日志和摘要
         problem_statement_text = extract_text_from_content(problem_statement_raw)
         
-        # 构建完整的对话上下文（排除最后一条用户消息）
-        conversation_context = ""
+        # 构建结构化的对话历史（排除最后一条用户消息）
+        conversation_history = []
         if len(request.messages) > 1:
             context_messages = request.messages[:-1]  # 排除最后一条消息
-            conversation_parts = []
             for msg in context_messages:
-                # 提取文本用于上下文说明
-                content_text = extract_text_from_content(msg.content)
-                conversation_parts.append(f"{msg.role.upper()}: {content_text}")
-            conversation_context = "\n\n".join(conversation_parts)
+                conversation_history.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
         
         # 创建后端客户端 - 传入RPM限制，将在每次调用后端API时进行限流
         client = create_client(provider_config.base_url, provider_config.key, model_config.rpm)
-        
-        # 不再直接注入提示词，而是通过标志传递给引擎
-        # 引擎会在正确的时机执行 Ask 和 Plan 阶段
-        
-        # 准备额外的提示词，包含对话上下文
-        other_prompts = []
-        if conversation_context:
-            other_prompts.append(f"\n### Previous Conversation ###\n{conversation_context}\n### End of Previous Conversation ###\n")
         
         # 根据模型级别处理
         reasoning_text = None
@@ -418,7 +398,7 @@ async def chat_completions(
                 client=client,
                 model=model_config.model,
                 problem_statement=problem_statement_raw,  # 传递多模态内容
-                other_prompts=other_prompts,
+                conversation_history=conversation_history,  # 传递结构化的消息历史
                 max_iterations=model_config.max_iterations,
                 required_successful_verifications=model_config.required_verifications,
                 num_agents=model_config.num_agent,
@@ -438,7 +418,7 @@ async def chat_completions(
                 client=client,
                 model=model_config.model,
                 problem_statement=problem_statement_raw,  # 传递多模态内容
-                other_prompts=other_prompts,
+                conversation_history=conversation_history,  # 传递结构化的消息历史
                 max_iterations=model_config.max_iterations,
                 required_successful_verifications=model_config.required_verifications,
                 model_stages=model_config.models,

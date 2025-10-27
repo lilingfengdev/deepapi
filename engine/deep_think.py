@@ -37,7 +37,8 @@ class DeepThinkEngine:
         client: OpenAIClient,
         model: str,
         problem_statement: MessageContent,  # 支持多模态内容
-        other_prompts: List[str] = None,
+        conversation_history: List[Dict[str, Any]] = None,  # 完整的消息历史
+        other_prompts: List[str] = None,  # 已弃用，保留向后兼容
         knowledge_context: str = None,
         max_iterations: int = 30,
         required_successful_verifications: int = 3,
@@ -51,7 +52,8 @@ class DeepThinkEngine:
         self.model = model
         self.problem_statement = problem_statement  # 可能是字符串或多模态内容
         self.problem_statement_text = extract_text_from_content(problem_statement)  # 提取纯文本版本
-        self.other_prompts = other_prompts or []
+        self.conversation_history = conversation_history or []  # 结构化的消息历史
+        self.other_prompts = other_prompts or []  # 向后兼容
         self.knowledge_context = knowledge_context
         self.max_iterations = max_iterations
         self.required_verifications = required_successful_verifications
@@ -166,7 +168,7 @@ class DeepThinkEngine:
         # 使用初始阶段的模型
         initial_model = self._get_model_for_stage("initial")
         
-        # 构建系统提示词，包含知识库和历史上下文
+        # 构建系统提示词，包含知识库
         system_prompt = DEEP_THINK_INITIAL_PROMPT
         
         if self.knowledge_context:
@@ -176,16 +178,26 @@ class DeepThinkEngine:
                 "\n\n### End of Knowledge Base ###\n"
             )
         
-        # 添加历史对话上下文
-        if other_prompts:
+        # 添加额外的提示词（用于向后兼容，例如 agent 特定提示词）
+        if self.other_prompts:
             system_prompt += "\n\n### Additional Context ###\n\n"
-            system_prompt += "\n\n".join(other_prompts)
+            system_prompt += "\n\n".join(self.other_prompts)
         
-        # 第一次思考 - 传递多模态内容和完整的系统提示词
+        # 构建消息列表：历史消息 + 当前问题
+        messages = []
+        
+        # 添加历史对话消息
+        if self.conversation_history:
+            messages.extend(self.conversation_history)
+        
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": problem_statement})
+        
+        # 第一次思考 - 使用完整的消息历史
         first_solution = await self.client.generate_text(
             model=initial_model,
             system=system_prompt,
-            prompt=problem_statement,  # 保留多模态内容
+            messages=messages,
             **self.llm_params
         )
         
@@ -196,7 +208,7 @@ class DeepThinkEngine:
         
         improvement_model = self._get_model_for_stage("improvement")
         
-        # 构建系统提示词，包含知识库和历史上下文
+        # 构建系统提示词，包含知识库
         system_prompt = DEEP_THINK_INITIAL_PROMPT
         if self.knowledge_context:
             system_prompt += (
@@ -205,19 +217,25 @@ class DeepThinkEngine:
                 "\n\n### End of Knowledge Base ###\n"
             )
         
-        # 添加历史对话上下文
-        if other_prompts:
+        # 添加额外的提示词（用于向后兼容）
+        if self.other_prompts:
             system_prompt += "\n\n### Additional Context ###\n\n"
-            system_prompt += "\n\n".join(other_prompts)
+            system_prompt += "\n\n".join(self.other_prompts)
+        
+        # 构建消息列表：历史 + 当前问题 + 第一次回答 + 改进请求
+        improvement_messages = []
+        if self.conversation_history:
+            improvement_messages.extend(self.conversation_history)
+        improvement_messages.extend([
+            {"role": "user", "content": problem_statement},
+            {"role": "assistant", "content": first_solution},
+            {"role": "user", "content": SELF_IMPROVEMENT_PROMPT},
+        ])
         
         improved_solution = await self.client.generate_text(
             model=improvement_model,
             system=system_prompt,
-            messages=[
-                {"role": "user", "content": problem_statement},
-                {"role": "assistant", "content": first_solution},
-                {"role": "user", "content": SELF_IMPROVEMENT_PROMPT},
-            ],
+            messages=improvement_messages,
             **self.llm_params
         )
         
@@ -297,7 +315,7 @@ class DeepThinkEngine:
                 
                 correction_model = self._get_model_for_stage("correction")
                 
-                # 构建系统提示词，包含知识库和历史上下文
+                # 构建系统提示词，包含知识库
                 system_prompt = DEEP_THINK_INITIAL_PROMPT
                 if self.knowledge_context:
                     system_prompt += (
@@ -306,19 +324,25 @@ class DeepThinkEngine:
                         "\n\n### End of Knowledge Base ###\n"
                     )
                 
-                # 添加历史对话上下文
+                # 添加额外的提示词（用于向后兼容）
                 if self.other_prompts:
                     system_prompt += "\n\n### Additional Context ###\n\n"
                     system_prompt += "\n\n".join(self.other_prompts)
                 
+                # 构建消息列表：历史 + 当前问题 + 之前的解答 + 修正请求
+                correction_messages = []
+                if self.conversation_history:
+                    correction_messages.extend(self.conversation_history)
+                correction_messages.extend([
+                    {"role": "user", "content": self.problem_statement},
+                    {"role": "assistant", "content": solution},
+                    {"role": "user", "content": CORRECTION_PROMPT + "\n\n" + verification["bug_report"]},
+                ])
+                
                 solution = await self.client.generate_text(
                     model=correction_model,
                     system=system_prompt,
-                    messages=[
-                        {"role": "user", "content": self.problem_statement},
-                        {"role": "assistant", "content": solution},
-                        {"role": "user", "content": CORRECTION_PROMPT + "\n\n" + verification["bug_report"]},
-                    ],
+                    messages=correction_messages,
                     **self.llm_params
                 )
                 
