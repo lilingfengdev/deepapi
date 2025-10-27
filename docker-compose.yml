@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   deepapi:
-    image: ghcr.io/zhongruan0522/deepapi:latest
+    image: ghcr.io/zhongruan0522/deepapi:beta
     container_name: deepapi
     ports:
       - "8000:8000"
@@ -10,6 +10,9 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - PYTHONUNBUFFERED=1
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
