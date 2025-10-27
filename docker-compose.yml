@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  deepapi:
+    image: ghcr.io/zhongruan0522/deepapi:latest
+    container_name: deepapi
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
