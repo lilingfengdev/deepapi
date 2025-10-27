@@ -63,6 +63,7 @@ class DeepThinkEngine:
         self.sources: List[Source] = []
         self.enable_planning = enable_planning
         self.llm_params = llm_params or {}
+        self._task = None  # 用于存储当前任务，以便取消
     
     def _get_model_for_stage(self, stage: str) -> str:
         """获取特定阶段的模型"""
@@ -256,185 +257,197 @@ class DeepThinkEngine:
     
     async def run(self) -> DeepThinkResult:
         """运行 Deep Think 引擎"""
-        # 发送事件时使用文本版本
-        self._emit("init", {"problem": self.problem_statement_text})
+        import logging
+        logger = logging.getLogger(__name__)
         
-        plan = None
-        
-        # Planning 阶段 (如果启用)
-        if self.enable_planning:
-            # 传递多模态内容给计划生成
-            plan = await self._generate_thinking_plan(self.problem_statement)
-            # 把计划加入 other_prompts
-            if plan:
-                self.other_prompts.append(f"\n### Thinking Plan ###\n{plan}\n")
-        
-        # 初始探索 - 传递多模态内容
-        initial = await self._initial_exploration(
-            self.problem_statement,
-            self.other_prompts
-        )
-        
-        solution = initial["solution"]
-        verification = initial["verification"]
-        
-        iterations: List[DeepThinkIteration] = []
-        verifications: List[Verification] = []
-        
-        error_count = 0
-        correct_count = 1 if "yes" in verification["good_verify"].lower() else 0
-        
-        # 主循环
-        for i in range(self.max_iterations):
-            passed = "yes" in verification["good_verify"].lower()
+        try:
+            # 发送事件时使用文本版本
+            self._emit("init", {"problem": self.problem_statement_text})
             
-            verifications.append(Verification(
-                timestamp=int(time.time()),
-                passed=passed,
-                bug_report=verification["bug_report"],
-                good_verify=verification["good_verify"],
-            ))
+            plan = None
             
-            iterations.append(DeepThinkIteration(
-                iteration=i,
-                solution=solution,
-                verification=verifications[-1],
-                status="completed" if passed else "correcting",
-            ))
+            # Planning 阶段 (如果启用)
+            if self.enable_planning:
+                # 传递多模态内容给计划生成
+                plan = await self._generate_thinking_plan(self.problem_statement)
+                # 把计划加入 other_prompts
+                if plan:
+                    self.other_prompts.append(f"\n### Thinking Plan ###\n{plan}\n")
             
-            if not passed:
-                correct_count = 0
-                error_count += 1
+            # 初始探索 - 传递多模态内容
+            initial = await self._initial_exploration(
+                self.problem_statement,
+                self.other_prompts
+            )
+            
+            solution = initial["solution"]
+            verification = initial["verification"]
+            
+            iterations: List[DeepThinkIteration] = []
+            verifications: List[Verification] = []
+            
+            error_count = 0
+            correct_count = 1 if "yes" in verification["good_verify"].lower() else 0
+            
+            # 主循环
+            for i in range(self.max_iterations):
+                # 检查是否被取消
+                await asyncio.sleep(0)  # 给取消信号一个检查点
                 
-                if error_count >= self.max_errors:
-                    self._emit("failure", {"reason": "Too many errors"})
-                    break
+                passed = "yes" in verification["good_verify"].lower()
                 
-                # 修正
-                self._emit("correction", {"iteration": i})
+                verifications.append(Verification(
+                    timestamp=int(time.time()),
+                    passed=passed,
+                    bug_report=verification["bug_report"],
+                    good_verify=verification["good_verify"],
+                ))
                 
-                correction_model = self._get_model_for_stage("correction")
+                iterations.append(DeepThinkIteration(
+                    iteration=i,
+                    solution=solution,
+                    verification=verifications[-1],
+                    status="completed" if passed else "correcting",
+                ))
                 
-                # 构建系统提示词，包含知识库
-                system_prompt = DEEP_THINK_INITIAL_PROMPT
-                if self.knowledge_context:
-                    system_prompt += (
-                        "\n\n### Available Knowledge Base ###\n\n" +
-                        self.knowledge_context +
-                        "\n\n### End of Knowledge Base ###\n"
+                if not passed:
+                    correct_count = 0
+                    error_count += 1
+                    
+                    if error_count >= self.max_errors:
+                        self._emit("failure", {"reason": "Too many errors"})
+                        break
+                    
+                    # 修正
+                    self._emit("correction", {"iteration": i})
+                    
+                    correction_model = self._get_model_for_stage("correction")
+                    
+                    # 构建系统提示词，包含知识库
+                    system_prompt = DEEP_THINK_INITIAL_PROMPT
+                    if self.knowledge_context:
+                        system_prompt += (
+                            "\n\n### Available Knowledge Base ###\n\n" +
+                            self.knowledge_context +
+                            "\n\n### End of Knowledge Base ###\n"
+                        )
+                    
+                    # 添加额外的提示词（用于向后兼容）
+                    if self.other_prompts:
+                        system_prompt += "\n\n### Additional Context ###\n\n"
+                        system_prompt += "\n\n".join(self.other_prompts)
+                    
+                    # 构建消息列表：历史 + 当前问题 + 之前的解答 + 修正请求
+                    correction_messages = []
+                    if self.conversation_history:
+                        correction_messages.extend(self.conversation_history)
+                    correction_messages.extend([
+                        {"role": "user", "content": self.problem_statement},
+                        {"role": "assistant", "content": solution},
+                        {"role": "user", "content": CORRECTION_PROMPT + "\n\n" + verification["bug_report"]},
+                    ])
+                    
+                    solution = await self.client.generate_text(
+                        model=correction_model,
+                        system=system_prompt,
+                        messages=correction_messages,
+                        **self.llm_params
+                    )
+                    
+                    self._emit("solution", {"solution": solution, "iteration": i + 1})
+                else:
+                    correct_count += 1
+                    error_count = 0
+                
+                if correct_count >= self.required_verifications:
+                    # 生成最终摘要
+                    self._emit("summarizing", {"message": "Generating final summary..."})
+                    
+                    summary_model = self._get_model_for_stage("summary")
+                    # 提取文本用于构建摘要提示词
+                    summary_prompt = build_final_summary_prompt(
+                        self.problem_statement_text,
+                        solution
+                    )
+                    
+                    final_summary = await self.client.generate_text(
+                        model=summary_model,
+                        prompt=summary_prompt,
+                        **self.llm_params
+                    )
+                    
+                    # 获取统计信息
+                    stats = self.client.get_statistics()
+                    
+                    self._emit("success", {
+                        "solution": final_summary, 
+                        "iterations": i + 1,
+                        "statistics": stats
+                    })
+                    
+                    return DeepThinkResult(
+                        mode="deep-think",
+                        plan=plan,
+                        initial_thought=initial["solution"],
+                        improvements=[],
+                        iterations=iterations,
+                        verifications=verifications,
+                        final_solution=solution,
+                        summary=final_summary,
+                        total_iterations=i + 1,
+                        successful_verifications=correct_count,
+                        sources=self.sources if self.sources else None,
+                        knowledge_enhanced=len(self.sources) > 0,
                     )
                 
-                # 添加额外的提示词（用于向后兼容）
-                if self.other_prompts:
-                    system_prompt += "\n\n### Additional Context ###\n\n"
-                    system_prompt += "\n\n".join(self.other_prompts)
-                
-                # 构建消息列表：历史 + 当前问题 + 之前的解答 + 修正请求
-                correction_messages = []
-                if self.conversation_history:
-                    correction_messages.extend(self.conversation_history)
-                correction_messages.extend([
-                    {"role": "user", "content": self.problem_statement},
-                    {"role": "assistant", "content": solution},
-                    {"role": "user", "content": CORRECTION_PROMPT + "\n\n" + verification["bug_report"]},
-                ])
-                
-                solution = await self.client.generate_text(
-                    model=correction_model,
-                    system=system_prompt,
-                    messages=correction_messages,
-                    **self.llm_params
-                )
-                
-                self._emit("solution", {"solution": solution, "iteration": i + 1})
-            else:
-                correct_count += 1
-                error_count = 0
-            
-            if correct_count >= self.required_verifications:
-                # 生成最终摘要
-                self._emit("summarizing", {"message": "Generating final summary..."})
-                
-                summary_model = self._get_model_for_stage("summary")
-                # 提取文本用于构建摘要提示词
-                summary_prompt = build_final_summary_prompt(
-                    self.problem_statement_text,
-                    solution
-                )
-                
-                final_summary = await self.client.generate_text(
-                    model=summary_model,
-                    prompt=summary_prompt,
-                    **self.llm_params
-                )
-                
-                # 获取统计信息
-                stats = self.client.get_statistics()
-                
-                self._emit("success", {
-                    "solution": final_summary, 
-                    "iterations": i + 1,
-                    "statistics": stats
+                # 再次验证
+                verification = await self._verify_solution(self.problem_statement, solution)
+                self._emit("verification", {
+                    "passed": "yes" in verification["good_verify"].lower(),
+                    "iteration": i + 1,
                 })
-                
-                return DeepThinkResult(
-                    mode="deep-think",
-                    plan=plan,
-                    initial_thought=initial["solution"],
-                    improvements=[],
-                    iterations=iterations,
-                    verifications=verifications,
-                    final_solution=solution,
-                    summary=final_summary,
-                    total_iterations=i + 1,
-                    successful_verifications=correct_count,
-                    sources=self.sources if self.sources else None,
-                    knowledge_enhanced=len(self.sources) > 0,
-                )
             
-            # 再次验证
-            verification = await self._verify_solution(self.problem_statement, solution)
-            self._emit("verification", {
-                "passed": "yes" in verification["good_verify"].lower(),
-                "iteration": i + 1,
+            # 失败 - 仍然生成摘要
+            self._emit("summarizing", {"message": "Generating final summary..."})
+            
+            summary_model = self._get_model_for_stage("summary")
+            # 提取文本用于构建摘要提示词
+            summary_prompt = build_final_summary_prompt(
+                self.problem_statement_text,
+                solution
+            )
+            
+            final_summary = await self.client.generate_text(
+                model=summary_model,
+                prompt=summary_prompt,
+                **self.llm_params
+            )
+            
+            # 获取统计信息
+            stats = self.client.get_statistics()
+            
+            self._emit("failure", {
+                "reason": "Max iterations reached",
+                "statistics": stats
             })
+            
+            return DeepThinkResult(
+                mode="deep-think",
+                plan=plan,
+                initial_thought=initial["solution"],
+                improvements=[],
+                iterations=iterations,
+                verifications=verifications,
+                final_solution=solution,
+                summary=final_summary,
+                total_iterations=self.max_iterations,
+                successful_verifications=correct_count,
+                sources=self.sources if self.sources else None,
+                knowledge_enhanced=len(self.sources) > 0,
+            )
         
-        # 失败 - 仍然生成摘要
-        self._emit("summarizing", {"message": "Generating final summary..."})
-        
-        summary_model = self._get_model_for_stage("summary")
-        # 提取文本用于构建摘要提示词
-        summary_prompt = build_final_summary_prompt(
-            self.problem_statement_text,
-            solution
-        )
-        
-        final_summary = await self.client.generate_text(
-            model=summary_model,
-            prompt=summary_prompt,
-            **self.llm_params
-        )
-        
-        # 获取统计信息
-        stats = self.client.get_statistics()
-        
-        self._emit("failure", {
-            "reason": "Max iterations reached",
-            "statistics": stats
-        })
-        
-        return DeepThinkResult(
-            mode="deep-think",
-            plan=plan,
-            initial_thought=initial["solution"],
-            improvements=[],
-            iterations=iterations,
-            verifications=verifications,
-            final_solution=solution,
-            summary=final_summary,
-            total_iterations=self.max_iterations,
-            successful_verifications=correct_count,
-            sources=self.sources if self.sources else None,
-            knowledge_enhanced=len(self.sources) > 0,
-        )
+        except asyncio.CancelledError:
+            # 引擎被取消，记录日志并退出
+            logger.info("DeepThink engine cancelled by client disconnect")
+            raise
 

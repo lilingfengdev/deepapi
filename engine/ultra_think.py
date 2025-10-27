@@ -241,47 +241,51 @@ class UltraThinkEngine:
     
     async def run(self) -> UltraThinkResult:
         """运行 Ultra Think 引擎"""
-        # 发送事件时使用文本版本
-        self._emit("init", {"problem": self.problem_statement_text})
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # 生成计划 (UltraThink 内置功能) - 传递多模态内容
-        plan = await self._generate_plan(self.problem_statement)
-        
-        # 生成 agent 配置
-        configs = await self._generate_agent_configs(plan)
-        
-        # 使用所有 LLM 建议的 agents,或者限制数量
-        selected_configs = configs[:self.num_agents] if self.num_agents else configs
-        num_agents = len(selected_configs)
-        
-        # 更新 agent 配置到 UI
-        if self.on_agent_update:
-            for config in selected_configs:
-                self.on_agent_update(config["agentId"], {
-                    "approach": config["approach"],
-                    "specific_prompt": config["specificPrompt"],
-                })
-        
-        # 并行运行 agents (使用信号量控制并发数)
-        self._emit("progress", {
-            "message": f"Running {num_agents} agents in parallel..."
-        })
-        
-        semaphore = asyncio.Semaphore(self.parallel_run_agent)
-        
-        async def run_with_semaphore(config):
-            async with semaphore:
-                return await self._run_agent(config, self.problem_statement)
-        
-        agent_results = await asyncio.gather(*[
-            run_with_semaphore(config) for config in selected_configs
-        ])
-        
-        # 综合结果 - 使用 DeepThink 引擎进行深度思考
-        self._emit("progress", {"message": "Synthesizing results with deep thinking..."})
-        
-        agent_results_text = "\n\n---\n\n".join([
-            f"""
+        try:
+            # 发送事件时使用文本版本
+            self._emit("init", {"problem": self.problem_statement_text})
+            
+            # 生成计划 (UltraThink 内置功能) - 传递多模态内容
+            plan = await self._generate_plan(self.problem_statement)
+            
+            # 生成 agent 配置
+            configs = await self._generate_agent_configs(plan)
+            
+            # 使用所有 LLM 建议的 agents,或者限制数量
+            selected_configs = configs[:self.num_agents] if self.num_agents else configs
+            num_agents = len(selected_configs)
+            
+            # 更新 agent 配置到 UI
+            if self.on_agent_update:
+                for config in selected_configs:
+                    self.on_agent_update(config["agentId"], {
+                        "approach": config["approach"],
+                        "specific_prompt": config["specificPrompt"],
+                    })
+            
+            # 并行运行 agents (使用信号量控制并发数)
+            self._emit("progress", {
+                "message": f"Running {num_agents} agents in parallel..."
+            })
+            
+            semaphore = asyncio.Semaphore(self.parallel_run_agent)
+            
+            async def run_with_semaphore(config):
+                async with semaphore:
+                    return await self._run_agent(config, self.problem_statement)
+            
+            agent_results = await asyncio.gather(*[
+                run_with_semaphore(config) for config in selected_configs
+            ])
+            
+            # 综合结果 - 使用 DeepThink 引擎进行深度思考
+            self._emit("progress", {"message": "Synthesizing results with deep thinking..."})
+            
+            agent_results_text = "\n\n---\n\n".join([
+                f"""
 ### Agent {idx + 1}: {result.approach}
 
 **Status:** {result.status}
@@ -290,11 +294,11 @@ class UltraThinkEngine:
 **Solution:**
 {result.solution or "No solution generated"}
 """
-            for idx, result in enumerate(agent_results)
-        ])
-        
-        # 构建综合问题提示 - 使用文本版本
-        synthesis_problem = f"""Based on the following problem and multiple solution approaches, synthesize a comprehensive final solution:
+                for idx, result in enumerate(agent_results)
+            ])
+            
+            # 构建综合问题提示 - 使用文本版本
+            synthesis_problem = f"""Based on the following problem and multiple solution approaches, synthesize a comprehensive final solution:
 
 **Original Problem:**
 {self.problem_statement_text}
@@ -303,84 +307,89 @@ class UltraThinkEngine:
 {agent_results_text}
 
 Please analyze all approaches, identify the best insights from each, resolve any contradictions, and provide a unified, comprehensive solution."""
+            
+            # 创建综合阶段的进度处理器
+            synthesis_state = {"thinking_started": False, "last_verification": None}
+            
+            def synthesis_progress_handler(event: ProgressEvent):
+                if event.type == "thinking":
+                    # 只在第一次 thinking 事件时发送消息
+                    if not synthesis_state["thinking_started"]:
+                        synthesis_state["thinking_started"] = True
+                        self._emit("progress", {"message": "Deep thinking on synthesis..."})
+                elif event.type == "verification":
+                    passed = event.data.get("passed", False)
+                    # 只在验证状态变化时发送消息
+                    if synthesis_state["last_verification"] != passed:
+                        synthesis_state["last_verification"] = passed
+                        if passed:
+                            self._emit("progress", {"message": "Synthesis verified"})
+                        else:
+                            self._emit("progress", {"message": "Refining synthesis..."})
+            
+            # 使用 DeepThink 引擎进行综合
+            synthesis_model = self._get_model_for_stage("synthesis")
+            synthesis_engine = DeepThinkEngine(
+                client=self.client,
+                model=synthesis_model,
+                problem_statement=synthesis_problem,
+                conversation_history=self.conversation_history,  # 传递结构化的消息历史
+                knowledge_context=self.knowledge_context,
+                max_iterations=self.max_iterations,
+                required_successful_verifications=self.required_verifications,
+                max_errors_before_give_up=self.max_errors,
+                model_stages=self.model_stages,
+                on_progress=synthesis_progress_handler,
+                llm_params=self.llm_params,
+            )
+            
+            synthesis_result = await synthesis_engine.run()
+            synthesis = synthesis_result.summary  # 使用 DeepThink 的摘要作为综合结果
+            
+            # 收集 synthesis 阶段的搜索来源
+            if synthesis_result.sources:
+                self.sources.extend(synthesis_result.sources)
+            
+            # 生成最终摘要
+            self._emit("summarizing", {"message": "Creating final summary for user..."})
+            
+            summary_model = self._get_model_for_stage("summary")
+            # 使用文本版本构建摘要提示词
+            summary_prompt = build_final_summary_prompt(
+                self.problem_statement_text,
+                synthesis
+            )
+            
+            final_summary = await self.client.generate_text(
+                model=summary_model,
+                prompt=summary_prompt,
+                **self.llm_params
+            )
+            
+            # 获取统计信息
+            stats = self.client.get_statistics()
+            
+            self._emit("success", {
+                "solution": final_summary, 
+                "iterations": 1,
+                "statistics": stats
+            })
+            
+            return UltraThinkResult(
+                mode="ultra-think",
+                plan=plan,
+                agent_results=agent_results,
+                synthesis=synthesis,
+                final_solution=synthesis,
+                summary=final_summary,
+                total_agents=num_agents,
+                completed_agents=len([r for r in agent_results if r.status == "completed"]),
+                sources=self.sources if self.sources else None,
+                knowledge_enhanced=len(self.sources) > 0,
+            )
         
-        # 创建综合阶段的进度处理器
-        synthesis_state = {"thinking_started": False, "last_verification": None}
-        
-        def synthesis_progress_handler(event: ProgressEvent):
-            if event.type == "thinking":
-                # 只在第一次 thinking 事件时发送消息
-                if not synthesis_state["thinking_started"]:
-                    synthesis_state["thinking_started"] = True
-                    self._emit("progress", {"message": "Deep thinking on synthesis..."})
-            elif event.type == "verification":
-                passed = event.data.get("passed", False)
-                # 只在验证状态变化时发送消息
-                if synthesis_state["last_verification"] != passed:
-                    synthesis_state["last_verification"] = passed
-                    if passed:
-                        self._emit("progress", {"message": "Synthesis verified"})
-                    else:
-                        self._emit("progress", {"message": "Refining synthesis..."})
-        
-        # 使用 DeepThink 引擎进行综合
-        synthesis_model = self._get_model_for_stage("synthesis")
-        synthesis_engine = DeepThinkEngine(
-            client=self.client,
-            model=synthesis_model,
-            problem_statement=synthesis_problem,
-            conversation_history=self.conversation_history,  # 传递结构化的消息历史
-            knowledge_context=self.knowledge_context,
-            max_iterations=self.max_iterations,
-            required_successful_verifications=self.required_verifications,
-            max_errors_before_give_up=self.max_errors,
-            model_stages=self.model_stages,
-            on_progress=synthesis_progress_handler,
-            llm_params=self.llm_params,
-        )
-        
-        synthesis_result = await synthesis_engine.run()
-        synthesis = synthesis_result.summary  # 使用 DeepThink 的摘要作为综合结果
-        
-        # 收集 synthesis 阶段的搜索来源
-        if synthesis_result.sources:
-            self.sources.extend(synthesis_result.sources)
-        
-        # 生成最终摘要
-        self._emit("summarizing", {"message": "Creating final summary for user..."})
-        
-        summary_model = self._get_model_for_stage("summary")
-        # 使用文本版本构建摘要提示词
-        summary_prompt = build_final_summary_prompt(
-            self.problem_statement_text,
-            synthesis
-        )
-        
-        final_summary = await self.client.generate_text(
-            model=summary_model,
-            prompt=summary_prompt,
-            **self.llm_params
-        )
-        
-        # 获取统计信息
-        stats = self.client.get_statistics()
-        
-        self._emit("success", {
-            "solution": final_summary, 
-            "iterations": 1,
-            "statistics": stats
-        })
-        
-        return UltraThinkResult(
-            mode="ultra-think",
-            plan=plan,
-            agent_results=agent_results,
-            synthesis=synthesis,
-            final_solution=synthesis,
-            summary=final_summary,
-            total_agents=num_agents,
-            completed_agents=len([r for r in agent_results if r.status == "completed"]),
-            sources=self.sources if self.sources else None,
-            knowledge_enhanced=len(self.sources) > 0,
-        )
+        except asyncio.CancelledError:
+            # 引擎被取消，记录日志并退出
+            logger.info("UltraThink engine cancelled by client disconnect")
+            raise
 
