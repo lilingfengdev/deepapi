@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class OpenAIClient:
     """OpenAI 客户端包装器"""
     
-    def __init__(self, base_url: str, api_key: str, rpm: Optional[int] = None):
+    def __init__(self, base_url: str, api_key: str, rpm: Optional[int] = None, max_retry: int = 3):
         # 创建带有超时设置的 HTTP 客户端
         # 这样可以确保在客户端断开时，HTTP 请求能更快响应取消
         http_client = httpx.AsyncClient(
@@ -25,6 +25,7 @@ class OpenAIClient:
             base_url=base_url,
             api_key=api_key,
             http_client=http_client,
+            max_retries=max_retry,
         )
         self.rpm = rpm
         self.rate_limiter = None
@@ -223,7 +224,7 @@ class OpenAIClient:
                 yield chunk.choices[0].delta.content
 
 
-def create_client(base_url: str, api_key: str, rpm: Optional[int] = None) -> OpenAIClient:
+def create_client(base_url: str, api_key: str, rpm: Optional[int] = None, max_retry: int = 3) -> OpenAIClient:
     """创建OpenAI客户端"""
-    return OpenAIClient(base_url, api_key, rpm)
+    return OpenAIClient(base_url, api_key, rpm, max_retry)
 

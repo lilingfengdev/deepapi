@@ -22,6 +22,7 @@ class ModelConfig:
         self.required_verifications = config.get("required_verifications", 3)
         self.max_errors = config.get("max_errors_before_give_up", 10)
         self.parallel_check = config.get("parallel_check", False)  # 并行验证模式
+        self.max_retry = config.get("max_retry")  # 最大重试次数(可选,不设置则使用系统默认值)
         
         # UltraThink 配置
         self.num_agent = config.get("num_agent")
@@ -56,6 +57,10 @@ class ModelConfig:
     def get_stage_model(self, stage: str) -> str:
         """获取特定阶段的模型,如果未配置则返回主模型"""
         return self.models.get(stage, self.model)
+    
+    def get_max_retry(self, default: int = 3) -> int:
+        """获取最大重试次数,如果未配置则使用提供的默认值"""
+        return self.max_retry if self.max_retry is not None else default
 
 
 class ProviderConfig:
@@ -130,6 +135,11 @@ class Config:
     def log_level(self) -> str:
         """日志级别"""
         return self._config.get("system", {}).get("log_level", "INFO")
+    
+    @property
+    def max_retry(self) -> int:
+        """默认最大重试次数"""
+        return self._config.get("system", {}).get("max_retry", 3)
     
     def get_model(self, model_id: str) -> Optional[ModelConfig]:
         """获取模型配置"""
