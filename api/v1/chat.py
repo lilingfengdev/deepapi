@@ -7,7 +7,7 @@ import uuid
 import json
 import logging
 import asyncio
-from typing import AsyncIterator, Dict, Any
+from typing import AsyncIterator, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse, JSONResponse
 
