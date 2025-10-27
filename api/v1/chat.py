@@ -38,6 +38,73 @@ def extract_llm_params(request: ChatCompletionRequest) -> Dict[str, Any]:
     return params
 
 
+def process_user_messages(messages: List[Message]) -> List[Message]:
+    """
+    处理用户发送的消息列表：
+    1. 提取所有 system role 消息并合并
+    2. 将合并后的 system 消息转为 user 消息
+    3. 放在第一条 user role 消息的最前面
+    
+    Args:
+        messages: 原始消息列表
+    
+    Returns:
+        处理后的消息列表（不包含 system role）
+    """
+    system_messages = []
+    non_system_messages = []
+    
+    # 分离 system 消息和其他消息
+    for msg in messages:
+        if msg.role == "system":
+            system_messages.append(msg)
+        else:
+            non_system_messages.append(msg)
+    
+    # 如果没有 system 消息，直接返回原列表
+    if not system_messages:
+        return messages
+    
+    # 合并所有 system 消息
+    merged_system_content = []
+    for msg in system_messages:
+        content_text = extract_text_from_content(msg.content)
+        if content_text.strip():
+            merged_system_content.append(content_text)
+    
+    # 如果合并后为空，直接返回非 system 消息
+    if not merged_system_content:
+        return non_system_messages
+    
+    # 创建转换后的 user 消息（带有明确的标识）
+    system_as_user_content = "# System Instructions\n\n" + "\n\n---\n\n".join(merged_system_content)
+    system_as_user_msg = Message(
+        role="user",
+        content=system_as_user_content
+    )
+    
+    # 找到第一条 user 消息的位置
+    first_user_index = None
+    for i, msg in enumerate(non_system_messages):
+        if msg.role == "user":
+            first_user_index = i
+            break
+    
+    # 插入转换后的消息
+    if first_user_index is not None:
+        # 在第一条 user 消息之前插入
+        processed_messages = (
+            non_system_messages[:first_user_index] +
+            [system_as_user_msg] +
+            non_system_messages[first_user_index:]
+        )
+    else:
+        # 如果没有 user 消息，放在最前面
+        processed_messages = [system_as_user_msg] + non_system_messages
+    
+    return processed_messages
+
+
 def verify_auth(authorization: str = Header(None)) -> bool:
     """验证 API 密钥"""
     if not config.api_key:
@@ -72,8 +139,11 @@ async def stream_chat_completion(
     if not request.messages:
         raise HTTPException(status_code=400, detail="No messages found")
     
+    # 处理用户消息：将 system role 合并后转为 user 消息
+    processed_messages = process_user_messages(request.messages)
+    
     # 提取最后一个用户消息作为当前问题
-    user_messages = [msg for msg in request.messages if msg.role == "user"]
+    user_messages = [msg for msg in processed_messages if msg.role == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="No user message found")
     
@@ -85,8 +155,8 @@ async def stream_chat_completion(
     
     # 构建结构化的对话历史（排除最后一条用户消息）
     conversation_history = []
-    if len(request.messages) > 1:
-        context_messages = request.messages[:-1]  # 排除最后一条消息
+    if len(processed_messages) > 1:
+        context_messages = processed_messages[:-1]  # 排除最后一条消息
         for msg in context_messages:
             conversation_history.append({
                 "role": msg.role,
@@ -369,8 +439,11 @@ async def chat_completions(
         if not request.messages:
             raise HTTPException(status_code=400, detail="No messages found")
         
+        # 处理用户消息：将 system role 合并后转为 user 消息
+        processed_messages = process_user_messages(request.messages)
+        
         # 提取最后一个用户消息作为当前问题
-        user_messages = [msg for msg in request.messages if msg.role == "user"]
+        user_messages = [msg for msg in processed_messages if msg.role == "user"]
         if not user_messages:
             raise HTTPException(status_code=400, detail="No user message found")
         
@@ -382,8 +455,8 @@ async def chat_completions(
         
         # 构建结构化的对话历史（排除最后一条用户消息）
         conversation_history = []
-        if len(request.messages) > 1:
-            context_messages = request.messages[:-1]  # 排除最后一条消息
+        if len(processed_messages) > 1:
+            context_messages = processed_messages[:-1]  # 排除最后一条消息
             for msg in context_messages:
                 conversation_history.append({
                     "role": msg.role,
