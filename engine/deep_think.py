@@ -121,7 +121,8 @@ class DeepThinkEngine:
         problem_text = extract_text_from_content(problem_statement)
         verification_prompt = build_verification_prompt(
             problem_text,
-            detailed_solution
+            detailed_solution,
+            self.conversation_history  # 传入对话历史
         )
         
         self._emit("progress", {"message": "Verifying solution..."})
@@ -171,7 +172,8 @@ class DeepThinkEngine:
         problem_text = extract_text_from_content(problem_statement)
         verification_prompt = build_verification_prompt(
             problem_text,
-            detailed_solution
+            detailed_solution,
+            self.conversation_history  # 传入对话历史
         )
         
         num_checks = self.required_verifications

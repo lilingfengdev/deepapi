@@ -295,13 +295,72 @@ Keep the plan focused and practical - it should guide your thinking, not constra
 
 # ============ 辅助函数 ============
 
-def build_verification_prompt(problem_statement: str, detailed_solution: str) -> str:
-    """构建验证提示词"""
+def build_verification_prompt(
+    problem_statement: str, 
+    detailed_solution: str,
+    conversation_history: list = None
+) -> str:
+    """构建验证提示词
+    
+    Args:
+        problem_statement: 当前问题陈述
+        detailed_solution: 需要验证的详细解决方案
+        conversation_history: 对话历史（可选），用于提供完整上下文
+    """
+    # 构建完整的问题上下文
+    problem_context = ""
+    
+    # 从对话历史中提取 System Instructions 和其他消息
+    system_instructions = None
+    other_messages = []
+    
+    if conversation_history and len(conversation_history) > 0:
+        for msg in conversation_history:
+            content = msg.get("content", "")
+            # 处理 content 可能是 list 的情况（多模态内容）
+            if isinstance(content, list):
+                content_parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            content_parts.append(item.get("text", ""))
+                        elif item.get("type") == "image_url":
+                            content_parts.append("[Image]")
+                    else:
+                        content_parts.append(str(item))
+                content = " ".join(content_parts)
+            
+            # 检查是否是转换后的 System Instructions
+            if isinstance(content, str) and content.startswith("# System Instructions"):
+                # 提取 System Instructions 的实际内容（去掉标题）
+                system_instructions = content.replace("# System Instructions\n\n", "", 1).strip()
+            else:
+                other_messages.append({"role": msg.get("role", "unknown"), "content": content})
+    
+    # 如果有 System Instructions，优先展示
+    if system_instructions:
+        problem_context += "### User System Instructions ###\n\n"
+        problem_context += system_instructions
+        problem_context += "\n\n---\n\n"
+    
+    # 如果有其他对话历史，展示对话历史
+    if other_messages:
+        problem_context += "### Conversation History ###\n\n"
+        for msg in other_messages:
+            role = msg.get("role", "unknown").capitalize()
+            content = msg.get("content", "")
+            problem_context += f"**{role}:** {content}\n\n"
+        problem_context += "---\n\n"
+    
+    # 添加当前问题
+    problem_context += "### Current Question/Problem ###\n\n"
+    problem_context += problem_statement
+    
     return f"""
 ======================================================================
 ### Original Question/Problem ###
 
-{problem_statement}
+{problem_context}
 
 ======================================================================
 ### Analysis to Review ###
