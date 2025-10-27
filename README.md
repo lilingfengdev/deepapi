@@ -55,9 +55,61 @@ model:
 
 ### 3. 运行服务
 
+#### 本地部署
+
 ```bash
 python main.py
 ```
+
+#### Docker 部署
+
+##### 使用 Docker Compose（推荐）
+
+```bash
+# 使用GitHub镜像运行
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+```
+
+##### 使用 Docker 直接运行
+
+```bash
+# 使用GitHub镜像直接运行
+docker run -d \
+  --name deepapi \
+  -p 8000:8000 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  ghcr.io/zhongruan0522/deepapi:latest
+
+# 如果需要本地构建
+docker build -t deepapi .
+docker run -d \
+  --name deepapi \
+  -p 8000:8000 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  deepapi
+```
+
+##### 环境变量说明
+- `PYTHONUNBUFFERED=1`: 启用Python日志输出
+- 自定义DNS服务器（解决网络问题）：`8.8.8.8`, `8.8.4.4`
+
+##### 健康检查
+容器包含健康检查，可通过以下命令查看状态：
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}"
+```
+
+##### 生产环境建议
+1. 使用稳定版本镜像标签（如 `beta` 或具体版本号），避免使用 `latest`
+2. 设置适当的资源限制
+3. 配置日志收集
+4. 使用HTTPS和适当的认证
 
 ## API 使用
 
@@ -219,3 +271,7 @@ models:
             ↓
     综合所有结果 → 输出最佳方案
 ```
+
+## 架构说明
+
+### DeepThink 流程
