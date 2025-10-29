@@ -22,10 +22,9 @@ from engine.prompts import (
     build_final_summary_prompt,
 )
 from engine.deep_think import DeepThinkEngine
-from .base import ThinkEngine, ThinkResult
 
 
-class UltraThinkEngine(ThinkEngine):
+class UltraThinkEngine:
     """Ultra Think 引擎 - 多 Agent 并行探索"""
     
     def __init__(

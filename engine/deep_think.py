@@ -27,10 +27,9 @@ from engine.prompts import (
     build_final_summary_prompt,
     build_thinking_plan_prompt,
 )
-from .base import ThinkEngine, ThinkResult
 
 
-class DeepThinkEngine(ThinkEngine):
+class DeepThinkEngine:
     """Deep Think 引擎 - 单 Agent 深度推理"""
     
     def __init__(
@@ -50,26 +49,32 @@ class DeepThinkEngine(ThinkEngine):
         enable_parallel_check: bool = False,
         llm_params: Optional[Dict[str, Any]] = None,
     ):
-        # 调用基类构造函数
-        super().__init__(
-            client=client,
-            model=model,
-            problem_statement=problem_statement,
-            conversation_history=conversation_history,
-            max_iterations=max_iterations,
-            required_successful_verifications=required_successful_verifications,
-            model_stages=model_stages,
-            enable_parallel_check=enable_parallel_check,
-            llm_params=llm_params,
-            on_progress=on_progress,
-        )
-        
-        # DeepThink 特有的属性
+        self.client = client
+        self.model = model
+        self.problem_statement = problem_statement  # 可能是字符串或多模态内容
+        self.problem_statement_text = extract_text_from_content(problem_statement)  # 提取纯文本版本
+        self.conversation_history = conversation_history or []  # 结构化的消息历史
         self.other_prompts = other_prompts or []  # 向后兼容
         self.knowledge_context = knowledge_context
+        self.max_iterations = max_iterations
+        self.required_verifications = required_successful_verifications
         self.max_errors = max_errors_before_give_up
+        self.model_stages = model_stages or {}
+        self.on_progress = on_progress
         self.sources: List[Source] = []
         self.enable_planning = enable_planning
+        self.enable_parallel_check = enable_parallel_check
+        self.llm_params = llm_params or {}
+        self._task = None  # 用于存储当前任务，以便取消
+    
+    def _get_model_for_stage(self, stage: str) -> str:
+        """获取特定阶段的模型"""
+        return self.model_stages.get(stage, self.model)
+    
+    def _emit(self, event_type: str, data: Dict[str, Any]):
+        """发送进度事件"""
+        if self.on_progress:
+            self.on_progress(ProgressEvent(type=event_type, data=data))
     
     def _extract_detailed_solution(
         self,
@@ -95,9 +100,11 @@ class DeepThinkEngine(ThinkEngine):
         prompt = build_thinking_plan_prompt(problem_text)
         
         # 直接使用 prompt 参数传递多模态内容
-        plan = await self._call_llm(
+        planning_model = self._get_model_for_stage("planning")
+        plan = await self.client.generate_text(
+            model=planning_model,
             prompt=problem_statement,  # 保留多模态内容
-            stage="planning"
+            **self.llm_params
         )
         
         self._emit("planning", {"plan": plan})
@@ -121,10 +128,11 @@ class DeepThinkEngine(ThinkEngine):
         verification_model = self._get_model_for_stage("verification")
         
         # 获取验证结果
-        verification_output = await self._call_llm(
-            prompt=verification_prompt,
+        verification_output = await self.client.generate_text(
+            model=verification_model,
             system=VERIFICATION_SYSTEM_PROMPT,
-            stage="verification"
+            prompt=verification_prompt,
+            **self.llm_params
         )
         
         # 检查验证是否通过
@@ -134,9 +142,10 @@ class DeepThinkEngine(ThinkEngine):
             f'justification gap?\n\n{verification_output}'
         )
         
-        good_verify = await self._call_llm(
+        good_verify = await self.client.generate_text(
+            model=verification_model,
             prompt=check_prompt,
-            stage="verification"
+            **self.llm_params
         )
         
         bug_report = ""
