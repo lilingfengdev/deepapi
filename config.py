@@ -6,71 +6,88 @@ import os
 from typing import Dict, Any, Optional, List
 import yaml
 from pathlib import Path
+from dataclasses import dataclass, field
 
 
+@dataclass
 class ModelConfig:
     """单个模型的配置"""
+    model_id: str
+    name: str
+    provider: str
+    model: str
+    level: str = "deepthink"  # deepthink, ultrathink
+    rpm: Optional[int] = None  # 每分钟请求限制
+    max_iterations: int = 30
+    required_verifications: int = 3
+    max_errors: int = 10
+    parallel_check: bool = False  # 并行验证模式
+    max_retry: Optional[int] = None  # 最大重试次数
     
-    def __init__(self, model_id: str, config: Dict[str, Any]):
-        self.model_id = model_id
-        self.name = config.get("name", model_id)
-        self.provider = config.get("provider")
-        self.model = config.get("model")
-        self.level = config.get("level", "deepthink")  # deepthink, ultrathink
-        self.rpm = config.get("rpm")  # 每分钟请求限制
-        self.max_iterations = config.get("max_iterations", 30)
-        self.required_verifications = config.get("required_verifications", 3)
-        self.max_errors = config.get("max_errors_before_give_up", 10)
-        self.parallel_check = config.get("parallel_check", False)  # 并行验证模式
-        self.max_retry = config.get("max_retry")  # 最大重试次数(可选,不设置则使用系统默认值)
-        
-        # UltraThink 配置
-        self.num_agent = config.get("num_agent")
-        self.parallel_run_agent = config.get("parallel_run_agent", 3)
-        
-        # 特性配置
-        self.feature = config.get("feature", {})
-        
-        # 分阶段模型配置
-        self.models = config.get("models", {})
+    # UltraThink 配置
+    num_agent: Optional[int] = None
+    parallel_run_agent: int = 3
     
-    @property
-    def has_vision(self) -> bool:
-        """是否支持视觉"""
-        return self.feature.get("vision", False)
+    # 特性配置 - 直接用布尔值，别搞那些花里胡哨的
+    has_vision: bool = False
+    has_summary_think: bool = False
+    has_plan_mode: bool = False
+    has_web_search: bool = False
     
-    @property
-    def has_summary_think(self) -> bool:
-        """是否生成思维链摘要"""
-        return self.feature.get("summary_think", False)
+    # 分阶段模型配置
+    models: Dict[str, str] = field(default_factory=dict)
     
-    @property
-    def has_plan_mode(self) -> bool:
-        """是否启用计划模式"""
-        return self.feature.get("plan_mode", False)
-    
-    @property
-    def has_web_search(self) -> bool:
-        """是否启用网页搜索"""
-        return self.feature.get("web_search", False)
+    @classmethod
+    def from_dict(cls, model_id: str, config: Dict[str, Any]) -> 'ModelConfig':
+        """从字典创建配置"""
+        feature = config.get("feature", {})
+        return cls(
+            model_id=model_id,
+            name=config.get("name", model_id),
+            provider=config.get("provider"),
+            model=config.get("model"),
+            level=config.get("level", "deepthink"),
+            rpm=config.get("rpm"),
+            max_iterations=config.get("max_iterations", 30),
+            required_verifications=config.get("required_verifications", 3),
+            max_errors=config.get("max_errors_before_give_up", 10),
+            parallel_check=config.get("parallel_check", False),
+            max_retry=config.get("max_retry"),
+            num_agent=config.get("num_agent"),
+            parallel_run_agent=config.get("parallel_run_agent", 3),
+            has_vision=feature.get("vision", False),
+            has_summary_think=feature.get("summary_think", False),
+            has_plan_mode=feature.get("plan_mode", False),
+            has_web_search=feature.get("web_search", False),
+            models=config.get("models", {})
+        )
     
     def get_stage_model(self, stage: str) -> str:
-        """获取特定阶段的模型,如果未配置则返回主模型"""
+        """获取特定阶段的模型"""
         return self.models.get(stage, self.model)
     
     def get_max_retry(self, default: int = 3) -> int:
-        """获取最大重试次数,如果未配置则使用提供的默认值"""
+        """获取最大重试次数"""
         return self.max_retry if self.max_retry is not None else default
 
 
+@dataclass
 class ProviderConfig:
     """提供商配置"""
+    provider_id: str
+    base_url: str = ""
+    key: str = ""
+    response_api: bool = True
     
-    def __init__(self, provider_id: str, config: Dict[str, Any]):
-        self.provider_id = provider_id
-        self.base_url = config.get("base_url", "")
-        self.key = config.get("key", "")
-        self.response_api = config.get("response_api", True)
+    @classmethod
+    def from_dict(cls, provider_id: str, config: Dict[str, Any]) -> 'ProviderConfig':
+        """从字典创建配置"""
+        return cls(
+            provider_id=provider_id,
+            base_url=config.get("base_url", ""),
+            key=config.get("key", ""),
+            response_api=config.get("response_api", True)
+        )
 
 
 class Config:
@@ -109,12 +126,12 @@ class Config:
         # 加载提供商配置
         providers = self._config.get("provider", {})
         for provider_id, provider_config in providers.items():
-            self._providers[provider_id] = ProviderConfig(provider_id, provider_config)
+            self._providers[provider_id] = ProviderConfig.from_dict(provider_id, provider_config)
         
         # 加载模型配置
         models = self._config.get("model", {})
         for model_id, model_config in models.items():
-            self._models[model_id] = ModelConfig(model_id, model_config)
+            self._models[model_id] = ModelConfig.from_dict(model_id, model_config)
     
     @property
     def api_key(self) -> str:

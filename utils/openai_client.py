@@ -15,16 +15,10 @@ class OpenAIClient:
     """OpenAI 客户端包装器"""
     
     def __init__(self, base_url: str, api_key: str, rpm: Optional[int] = None, max_retry: int = 3):
-        # 创建带有超时设置的 HTTP 客户端
-        # 这样可以确保在客户端断开时，HTTP 请求能更快响应取消
-        http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(3000.0, connect=10.0, read=1200.0),  # 总超时300秒，读取120秒
-        )
-        
+        # OpenAI客户端自己会管理连接，不需要我们操心
         self.client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key,
-            http_client=http_client,
             max_retries=max_retry,
         )
         self.rpm = rpm

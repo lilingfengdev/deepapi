@@ -6,24 +6,9 @@ from fastapi import APIRouter, Header, HTTPException
 from typing import List, Dict, Any
 
 from config import config
+from .chat import verify_auth  # 复用，别重复造轮子
 
 router = APIRouter()
-
-
-def verify_auth(authorization: str = Header(None)) -> bool:
-    """验证 API 密钥"""
-    if not config.api_key:
-        return True
-    
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing authorization header")
-    
-    token = authorization.replace("Bearer ", "").strip()
-    
-    if not config.validate_api_key(token):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    
-    return True
 
 
 @router.get("/v1/models")

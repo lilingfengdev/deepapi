@@ -27,9 +27,10 @@ from engine.prompts import (
     build_final_summary_prompt,
     build_thinking_plan_prompt,
 )
+from .base import ThinkEngine, ThinkResult
 
 
-class DeepThinkEngine:
+class DeepThinkEngine(ThinkEngine):
     """Deep Think 引擎 - 单 Agent 深度推理"""
     
     def __init__(
@@ -49,32 +50,26 @@ class DeepThinkEngine:
         enable_parallel_check: bool = False,
         llm_params: Optional[Dict[str, Any]] = None,
     ):
-        self.client = client
-        self.model = model
-        self.problem_statement = problem_statement  # 可能是字符串或多模态内容
-        self.problem_statement_text = extract_text_from_content(problem_statement)  # 提取纯文本版本
-        self.conversation_history = conversation_history or []  # 结构化的消息历史
+        # 调用基类构造函数
+        super().__init__(
+            client=client,
+            model=model,
+            problem_statement=problem_statement,
+            conversation_history=conversation_history,
+            max_iterations=max_iterations,
+            required_successful_verifications=required_successful_verifications,
+            model_stages=model_stages,
+            enable_parallel_check=enable_parallel_check,
+            llm_params=llm_params,
+            on_progress=on_progress,
+        )
+        
+        # DeepThink 特有的属性
         self.other_prompts = other_prompts or []  # 向后兼容
         self.knowledge_context = knowledge_context
-        self.max_iterations = max_iterations
-        self.required_verifications = required_successful_verifications
         self.max_errors = max_errors_before_give_up
-        self.model_stages = model_stages or {}
-        self.on_progress = on_progress
         self.sources: List[Source] = []
         self.enable_planning = enable_planning
-        self.enable_parallel_check = enable_parallel_check
-        self.llm_params = llm_params or {}
-        self._task = None  # 用于存储当前任务，以便取消
-    
-    def _get_model_for_stage(self, stage: str) -> str:
-        """获取特定阶段的模型"""
-        return self.model_stages.get(stage, self.model)
-    
-    def _emit(self, event_type: str, data: Dict[str, Any]):
-        """发送进度事件"""
-        if self.on_progress:
-            self.on_progress(ProgressEvent(type=event_type, data=data))
     
     def _extract_detailed_solution(
         self,
@@ -100,42 +95,36 @@ class DeepThinkEngine:
         prompt = build_thinking_plan_prompt(problem_text)
         
         # 直接使用 prompt 参数传递多模态内容
-        plan = await self.client.generate_text(
-            model=self.model,
+        plan = await self._call_llm(
             prompt=problem_statement,  # 保留多模态内容
-            **self.llm_params
+            stage="planning"
         )
         
         self._emit("planning", {"plan": plan})
         
         return plan
     
-    async def _verify_solution(
-        self,
-        problem_statement: MessageContent,
-        solution: str
-    ) -> Dict[str, str]:
-        """验证解决方案"""
+    async def _verify_solution(self, solution: str, index: int) -> Dict[str, Any]:
+        """验证解决方案 - 实现基类接口"""
         detailed_solution = self._extract_detailed_solution(solution)
         # 提取文本用于构建提示词
-        problem_text = extract_text_from_content(problem_statement)
+        problem_text = extract_text_from_content(self.problem_statement)
         verification_prompt = build_verification_prompt(
             problem_text,
             detailed_solution,
             self.conversation_history  # 传入对话历史
         )
         
-        self._emit("progress", {"message": "Verifying solution..."})
+        self._emit("progress", {"message": f"Verifying solution (attempt {index + 1})..."})
         
         # 使用验证阶段的模型
         verification_model = self._get_model_for_stage("verification")
         
         # 获取验证结果
-        verification_output = await self.client.generate_text(
-            model=verification_model,
-            system=VERIFICATION_SYSTEM_PROMPT,
+        verification_output = await self._call_llm(
             prompt=verification_prompt,
-            **self.llm_params
+            system=VERIFICATION_SYSTEM_PROMPT,
+            stage="verification"
         )
         
         # 检查验证是否通过
@@ -145,10 +134,9 @@ class DeepThinkEngine:
             f'justification gap?\n\n{verification_output}'
         )
         
-        good_verify = await self.client.generate_text(
-            model=verification_model,
+        good_verify = await self._call_llm(
             prompt=check_prompt,
-            **self.llm_params
+            stage="verification"
         )
         
         bug_report = ""
@@ -163,13 +151,12 @@ class DeepThinkEngine:
     
     async def _verify_solution_parallel(
         self,
-        problem_statement: MessageContent,
         solution: str
     ) -> Dict[str, str]:
         """并行验证解决方案 - 同时启动required_verifications个验证LLM调用，全部通过才算成功"""
         detailed_solution = self._extract_detailed_solution(solution)
         # 提取文本用于构建提示词
-        problem_text = extract_text_from_content(problem_statement)
+        problem_text = extract_text_from_content(self.problem_statement)
         verification_prompt = build_verification_prompt(
             problem_text,
             detailed_solution,
@@ -335,15 +322,9 @@ class DeepThinkEngine:
         
         # 验证 - 根据配置选择串行或并行
         if self.enable_parallel_check:
-            verification = await self._verify_solution_parallel(
-                problem_statement,
-                improved_solution
-            )
+            verification = await self._verify_solution_parallel(improved_solution)
         else:
-            verification = await self._verify_solution(
-                problem_statement,
-                improved_solution
-            )
+            verification = await self._verify_solution(improved_solution, 0)
         
         self._emit("verification", {
             "passed": "yes" in verification["good_verify"].lower(),
@@ -499,9 +480,9 @@ class DeepThinkEngine:
                 
                 # 再次验证 - 根据配置选择串行或并行
                 if self.enable_parallel_check:
-                    verification = await self._verify_solution_parallel(self.problem_statement, solution)
+                    verification = await self._verify_solution_parallel(solution)
                 else:
-                    verification = await self._verify_solution(self.problem_statement, solution)
+                    verification = await self._verify_solution(solution, i + 1)
                 self._emit("verification", {
                     "passed": "yes" in verification["good_verify"].lower(),
                     "iteration": i + 1,
