@@ -251,7 +251,11 @@ class DeepThinkEngine:
         other_prompts: List[str]
     ) -> Dict[str, Any]:
         """初始探索阶段"""
-        self._emit("thinking", {"iteration": 0, "phase": "initial-exploration"})
+        self._emit("thinking", {
+            "iteration": 0, 
+            "phase": "initial-exploration",
+            "message": "Starting initial exploration of the problem"
+        })
         
         # 使用初始阶段的模型
         initial_model = self._get_model_for_stage("initial")
@@ -292,7 +296,11 @@ class DeepThinkEngine:
         self._emit("solution", {"solution": first_solution, "iteration": 0})
         
         # 自我改进
-        self._emit("thinking", {"iteration": 0, "phase": "self-improvement"})
+        self._emit("thinking", {
+            "iteration": 0, 
+            "phase": "self-improvement",
+            "solution": first_solution
+        })
         
         improvement_model = self._get_model_for_stage("improvement")
         
@@ -337,6 +345,8 @@ class DeepThinkEngine:
         
         self._emit("verification", {
             "passed": "yes" in verification["good_verify"].lower(),
+            "good_verify": verification["good_verify"],
+            "bug_report": verification.get("bug_report", ""),
             "iteration": 0,
         })
         
@@ -406,7 +416,11 @@ class DeepThinkEngine:
                         break
                     
                     # 修正
-                    self._emit("correction", {"iteration": i})
+                    self._emit("thinking", {
+                        "iteration": i + 1, 
+                        "phase": "correction",
+                        "bug_report": verification["bug_report"]
+                    })
                     
                     correction_model = self._get_model_for_stage("correction")
                     
@@ -441,7 +455,10 @@ class DeepThinkEngine:
                         **self.llm_params
                     )
                     
-                    self._emit("solution", {"solution": solution, "iteration": i + 1})
+                    self._emit("thinking", {
+                        "iteration": i + 1,
+                        "solution": solution
+                    })
                 else:
                     correct_count += 1
                     error_count = 0
@@ -494,6 +511,8 @@ class DeepThinkEngine:
                     verification = await self._verify_solution(solution, i + 1)
                 self._emit("verification", {
                     "passed": "yes" in verification["good_verify"].lower(),
+                    "good_verify": verification["good_verify"],
+                    "bug_report": verification.get("bug_report", ""),
                     "iteration": i + 1,
                 })
             

@@ -53,6 +53,7 @@ model:
       verification: gemini-2.5-pro      # 验证阶段
       correction: gemini-2.5-pro        # 修正阶段
       summary: gemini-2.5-pro           # 总结阶段
+      summary_thinking: gpt-4o-mini     # 思维链总结模型 (可选,用于生成 o1 风格思考过程)
 
   # 快速版本 - 更高的 RPM
   gemini-2.5-pro-deepthink-fast:
@@ -67,6 +68,10 @@ model:
     feature:
       vision: true
       summary_think: true
+    
+    # 使用小模型进行思维链总结，提高效率
+    models:
+      summary_thinking: gpt-4o-mini     # 使用快速小模型生成思考过程
 
   # UltraThink 模型示例
   gpt-4o-ultrathink:
@@ -88,5 +93,22 @@ model:
       agent_thinking: gpt-4o            # UltraThink: Agent思考阶段
       synthesis: gpt-4o                 # UltraThink: 综合阶段
       summary: gpt-4o                   # 总结阶段
+      summary_thinking: gpt-4o-mini     # 思维链总结模型
 
+  # 简单模式示例（不使用 LLM 思维链总结）
+  gpt-3.5-deepthink-simple:
+    name: "GPT-3.5 DeepThink Simple"
+    provider: openai
+    model: gpt-3.5-turbo
+    level: deepthink
+    feature:
+      summary_think: true               # 启用思维链总结
+    # 不配置 models.summary_thinking，将使用简单的文本映射
+
+# 思维链总结功能说明：
+# 1. feature.summary_think 必须设置为 true 才能启用思维链总结
+# 2. models.summary_thinking 设置为小模型名称（如 gpt-4o-mini）可启用 LLM 总结
+# 3. 如果不设置 summary_thinking，将使用简单的文本映射
+# 4. 推荐使用快速、便宜的模型作为 summary_thinking 模型
+# 5. 思维链总结会生成 o1 风格的内心独白，带有清晰的阶段标题
 

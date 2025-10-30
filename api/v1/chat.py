@@ -17,7 +17,12 @@ from models import (
 )
 from config import config
 from utils.openai_client import create_client
-from utils.summary_think import ThinkingSummaryGenerator, UltraThinkSummaryGenerator, generate_simple_thinking_tag
+from utils.summary_think import (
+    ThinkingSummaryGenerator, 
+    UltraThinkSummaryGenerator, 
+    LLMThinkingSummaryGenerator,
+    generate_simple_thinking_tag
+)
 from engine.deep_think import DeepThinkEngine
 from engine.ultra_think import UltraThinkEngine
 
@@ -161,7 +166,13 @@ async def _run_engine_with_streaming(
                 event = progress_queue.pop(0)
                 # 如果启用了 summary_think,将事件转换为思维链
                 if thinking_generator:
-                    thinking_text = thinking_generator.process_event(event)
+                    # 检查是否是 LLM 总结器
+                    if isinstance(thinking_generator, LLMThinkingSummaryGenerator):
+                        # 使用异步方法
+                        thinking_text = await thinking_generator.process_event_async(event)
+                    else:
+                        # 使用同步方法
+                        thinking_text = thinking_generator.process_event(event)
                     if thinking_text:
                         # 使用 reasoning_content 字段输出推理过程
                         delta = {"reasoning_content": thinking_text}
@@ -186,7 +197,13 @@ async def _run_engine_with_streaming(
         while progress_queue:
             event = progress_queue.pop(0)
             if thinking_generator:
-                thinking_text = thinking_generator.process_event(event)
+                # 检查是否是 LLM 总结器
+                if isinstance(thinking_generator, LLMThinkingSummaryGenerator):
+                    # 使用异步方法
+                    thinking_text = await thinking_generator.process_event_async(event)
+                else:
+                    # 使用同步方法
+                    thinking_text = thinking_generator.process_event(event)
                 if thinking_text:
                     delta = {"reasoning_content": thinking_text}
                     chunk_data = {
@@ -292,10 +309,29 @@ async def stream_chat_completion(
     # 如果启用了 summary_think,创建思维链生成器
     thinking_generator = None
     if model_config.has_summary_think:
-        if model_config.level == "ultrathink":
-            thinking_generator = UltraThinkSummaryGenerator()
+        # 检查是否配置了专门的总结模型
+        summary_model = model_config.get_stage_model("summary_thinking")
+        
+        if summary_model and summary_model != model_config.model:
+            # 使用 LLM 总结器 - 创建独立的客户端避免影响主流程
+            summary_client = create_client(
+                provider_config.base_url, 
+                provider_config.key,
+                None,  # 总结不需要限流
+                max_retry
+            )
+            thinking_generator = LLMThinkingSummaryGenerator(
+                client=summary_client,
+                model=summary_model,
+                mode="ultrathink" if model_config.level == "ultrathink" else "deepthink"
+            )
+            logger.info(f"Using LLM thinking summarizer with model: {summary_model}")
         else:
-            thinking_generator = ThinkingSummaryGenerator(mode="deepthink")
+            # 使用简单的文本映射总结器
+            if model_config.level == "ultrathink":
+                thinking_generator = UltraThinkSummaryGenerator()
+            else:
+                thinking_generator = ThinkingSummaryGenerator(mode="deepthink")
     
     
     # 根据模型级别选择引擎
