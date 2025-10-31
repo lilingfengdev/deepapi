@@ -76,5 +76,7 @@ if __name__ == "__main__":
         host=config.host,
         port=config.port,
         log_level=config.log_level.lower(),
+        timeout_keep_alive=300,  # 5分钟的 keep-alive 超时
+        timeout_graceful_shutdown=30,  # 30秒的优雅关闭超时
     )
 

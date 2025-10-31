@@ -236,8 +236,10 @@ async def _run_engine_with_streaming(
                 }]
             }
             yield f"data: {json.dumps(chunk_data)}\n\n"
+            # 小延迟，避免流控制问题
+            await asyncio.sleep(0.01)
             
-    except GeneratorExit:
+    except (GeneratorExit, asyncio.CancelledError):
         # 客户端断开连接，取消引擎任务
         logger.info(f"Client disconnected for request {request_id}, cancelling engine task")
         if engine_task and not engine_task.done():
@@ -246,9 +248,9 @@ async def _run_engine_with_streaming(
                 await engine_task
             except asyncio.CancelledError:
                 pass  # 预期的取消异常
-        # 不重新抛出 GeneratorExit，让生成器正常结束
-    except (asyncio.CancelledError, Exception) as e:
-        # 其他异常情况，记录日志并取消任务
+        # 不重新抛出，让生成器正常结束
+    except Exception as e:
+        # 真正的异常情况，记录日志并取消任务
         logger.error(f"Error during streaming for request {request_id}: {e}")
         if engine_task and not engine_task.done():
             engine_task.cancel()
@@ -257,6 +259,9 @@ async def _run_engine_with_streaming(
             except asyncio.CancelledError:
                 pass
         raise  # 重新抛出异常
+    finally:
+        # 确保所有数据都已发送
+        await asyncio.sleep(0.01)
 
 
 async def stream_chat_completion(
@@ -384,6 +389,8 @@ async def stream_chat_completion(
         }]
     }
     yield f"data: {json.dumps(chunk_data)}\n\n"
+    # 确保数据已发送再发送 DONE
+    await asyncio.sleep(0.01)
     yield "data: [DONE]\n\n"
 
 
