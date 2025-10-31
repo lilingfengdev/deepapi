@@ -79,7 +79,7 @@ docker-compose down
 ##### 使用 Docker 直接运行
 
 ```bash
-# 使用GitHub镜像直接运行
+# 使用GitHub镜像直接运行（支持多架构，Docker会自动选择合适的架构）
 docker run -d \
   --name deepapi \
   -p 8000:8000 \
@@ -94,6 +94,12 @@ docker run -d \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
   deepapi
 ```
+
+**架构支持说明**
+- 镜像支持 `linux/amd64` 和 `linux/arm64` 双架构
+- Docker 会根据你的服务器架构自动拉取对应镜像
+- 在 ARM64 服务器（如 AWS Graviton、Apple Silicon）上会自动使用 arm64 版本
+- 在传统 x86_64 服务器上会自动使用 amd64 版本
 
 ##### 环境变量说明
 - `PYTHONUNBUFFERED=1`: 启用Python日志输出

@@ -1,5 +1,5 @@
-# 使用官方Python运行时作为基础镜像
-FROM python:3.11-slim
+# 使用官方Python运行时作为基础镜像，支持多架构
+FROM --platform=linux/amd64,linux/arm64 python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
